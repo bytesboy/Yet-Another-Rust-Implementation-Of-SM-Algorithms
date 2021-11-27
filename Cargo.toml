@@ -1,0 +1,10 @@
+[package]
+name = "yarism"
+version = "0.1.0"
+edition = "2021"
+description = "Yet another rust implementation of Chinese standard cryptographic algorithms, including SM2,SM3,SM4"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+hex = "0.4.3"
