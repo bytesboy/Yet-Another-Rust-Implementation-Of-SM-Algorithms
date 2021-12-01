@@ -32,15 +32,15 @@ fn p1(x: u32) -> u32 {
 
 
 #[derive(Debug)]
-pub struct Cryptographer {
+pub struct Crypto {
     data: Vec<u8>,
     blocks: Vec<[u8; 64]>,
     registers: [u32; 8],
 }
 
-impl Cryptographer {
+impl Crypto {
     pub fn new(data: &[u8]) -> Self {
-        Cryptographer {
+        Crypto {
             data: data.iter().map(|e| *e).collect(),
             blocks: Vec::new(),
             registers: IV,
@@ -229,13 +229,13 @@ impl Cryptographer {
 
 #[cfg(test)]
 mod tests {
-    use crate::sm3::core::Cryptographer;
+    use crate::sm3::core::Crypto;
 
     #[test]
     fn main() {
         let plain = String::from("abc");
         let data = plain.as_bytes();
-        let hash = Cryptographer::new(data).pad().block().iterate().hash();
+        let hash = Crypto::new(data).pad().block().iterate().hash();
         assert_eq!(hash, "66c7f0f462eeedd9d1f2d46bdc10e4e24167c4875cf2f7a2297da02b8f4ba8e0");
     }
 }
