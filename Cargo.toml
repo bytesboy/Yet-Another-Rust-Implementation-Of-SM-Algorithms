@@ -8,3 +8,4 @@ description = "Yet another rust implementation of Chinese standard cryptographic
 
 [dependencies]
 hex = "0.4.3"
+uuid = { version = "0.8.2", features = ["v4"] }
