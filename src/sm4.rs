@@ -48,28 +48,19 @@ impl CryptoFactory {
     pub fn new(mode: Mode) -> Box<dyn Cryptographer> {
         match mode {
             Mode::ECB { key } => {
-                let k = hex_decode_of_key(&key);
-                Box::new(ecb::CryptoMode::new(&k))
+                Box::new(ecb::CryptoMode::new(&hex_decode_of_key(&key)))
             }
             Mode::CBC { key, iv } => {
-                let k = hex_decode_of_key(&key);
-                let v = hex_decode_of_iv(&iv);
-                Box::new(cbc::CryptoMode::new(&k, &v))
+                Box::new(cbc::CryptoMode::new(&hex_decode_of_key(&key), &hex_decode_of_iv(&iv)))
             }
             Mode::CFB { key, iv } => {
-                let k = hex_decode_of_key(&key);
-                let v = hex_decode_of_iv(&iv);
-                Box::new(cfb::CryptoMode::new(&k, &v))
+                Box::new(cfb::CryptoMode::new(&hex_decode_of_key(&key), &hex_decode_of_iv(&iv)))
             }
             Mode::OFB { key, iv } => {
-                let k = hex_decode_of_key(&key);
-                let v = hex_decode_of_iv(&iv);
-                Box::new(ofb::CryptoMode::new(&k, &v))
+                Box::new(ofb::CryptoMode::new(&hex_decode_of_key(&key), &hex_decode_of_iv(&iv)))
             }
             Mode::CTR { key, iv } => {
-                let k = hex_decode_of_key(&key);
-                let v = hex_decode_of_iv(&iv);
-                Box::new(ctr::CryptoMode::new(&k, &v))
+                Box::new(ctr::CryptoMode::new(&hex_decode_of_key(&key), &hex_decode_of_iv(&iv)))
             }
         }
     }
