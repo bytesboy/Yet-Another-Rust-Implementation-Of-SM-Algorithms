@@ -39,7 +39,7 @@ pub struct Crypto {
 }
 
 impl Crypto {
-    pub fn init(data: &[u8]) -> Self {
+    pub fn new(data: &[u8]) -> Self {
         Crypto {
             data: data.iter().map(|e| *e).collect(),
             blocks: Vec::new(),
@@ -235,7 +235,7 @@ mod tests {
     fn main() {
         let plain = String::from("abc");
         let data = plain.as_bytes();
-        let hash = Crypto::init(data).pad().block().iterate().hash();
+        let hash = Crypto::new(data).pad().block().iterate().hash();
         assert_eq!(hash, "66c7f0f462eeedd9d1f2d46bdc10e4e24167c4875cf2f7a2297da02b8f4ba8e0");
     }
 }
