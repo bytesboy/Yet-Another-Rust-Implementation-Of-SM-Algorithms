@@ -67,27 +67,67 @@ pub static EC_GY: [u8; 32] = [
     0x21, 0x39, 0xF0, 0xA0,
 ];
 
+/// Montgomery算法预计算 (1/R) mod P
+/// R = 2^257 = 2 * 16^64 = 0x20000000000000000000000000000000000000000000000000000000000000000
+pub static RI: [u8; 32] = [
+    0x7F, 0xFF, 0xFF, 0xFD,
+    0x80, 0x00, 0x00, 0x02,
+    0xFF, 0xFF, 0xFF, 0xFE,
+    0x00, 0x00, 0x00, 0x01,
+    0x7F, 0xFF, 0xFF, 0xFE,
+    0x80, 0x00, 0x00, 0x03,
+    0x7F, 0xFF, 0xFF, 0xFC,
+    0x80, 0x00, 0x00, 0x02
+];
 
 #[cfg(test)]
 mod tests {
-    use num_bigint::BigUint;
+    use num_bigint::{BigInt, BigUint, Sign};
+    use num_integer::Integer;
     use num_traits::Num;
+
     use crate::sm2::p256::{EC_A, EC_B, EC_GX, EC_GY, EC_N, EC_P};
 
     #[test]
     fn params() {
-        let p = BigUint::from_str_radix("FFFFFFFEFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF00000000FFFFFFFFFFFFFFFF", 16).unwrap();
+        let p = BigUint::from_str_radix(
+            "FFFFFFFEFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF00000000FFFFFFFFFFFFFFFF", 16).unwrap();
         assert_eq!(p, BigUint::from_bytes_be(&EC_P));
-        let a = BigUint::from_str_radix("FFFFFFFEFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF00000000FFFFFFFFFFFFFFFC", 16).unwrap();
+
+        let a = BigUint::from_str_radix(
+            "FFFFFFFEFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF00000000FFFFFFFFFFFFFFFC", 16).unwrap();
         assert_eq!(a, BigUint::from_bytes_be(&EC_A));
-        let b = BigUint::from_str_radix("28E9FA9E9D9F5E344D5A9E4BCF6509A7F39789F515AB8F92DDBCBD414D940E93", 16).unwrap();
+
+        let b = BigUint::from_str_radix(
+            "28E9FA9E9D9F5E344D5A9E4BCF6509A7F39789F515AB8F92DDBCBD414D940E93", 16).unwrap();
         assert_eq!(b, BigUint::from_bytes_be(&EC_B));
-        let n = BigUint::from_str_radix("FFFFFFFEFFFFFFFFFFFFFFFFFFFFFFFF7203DF6B21C6052B53BBF40939D54123", 16).unwrap();
+
+        let n = BigUint::from_str_radix(
+            "FFFFFFFEFFFFFFFFFFFFFFFFFFFFFFFF7203DF6B21C6052B53BBF40939D54123", 16).unwrap();
         assert_eq!(n, BigUint::from_bytes_be(&EC_N));
-        let gx = BigUint::from_str_radix("32C4AE2C1F1981195F9904466A39C9948FE30BBFF2660BE1715A4589334C74C7", 16).unwrap();
+
+        let gx = BigUint::from_str_radix(
+            "32C4AE2C1F1981195F9904466A39C9948FE30BBFF2660BE1715A4589334C74C7", 16).unwrap();
         assert_eq!(gx, BigUint::from_bytes_be(&EC_GX));
-        let gy = BigUint::from_str_radix("BC3736A2F4F6779C59BDCEE36B692153D0A9877CC62A474002DF32E52139F0A0", 16).unwrap();
+
+        let gy = BigUint::from_str_radix(
+            "BC3736A2F4F6779C59BDCEE36B692153D0A9877CC62A474002DF32E52139F0A0", 16).unwrap();
         assert_eq!(gy, BigUint::from_bytes_be(&EC_GY));
+    }
+
+
+    #[test]
+    fn ri_recomputed() {
+        let r_hex = "20000000000000000000000000000000000000000000000000000000000000000";
+        let ri_hex = "7ffffffd80000002fffffffe000000017ffffffe800000037ffffffc80000002";
+
+        let p = BigInt::from_bytes_be(Sign::Plus, &EC_P);
+        let r = BigInt::from(2u64).pow(257);
+        assert_eq!(r.to_str_radix(16), r_hex);
+
+        let ext = r.extended_gcd(&p);
+        let ri = ext.x.mod_floor(&p);
+        assert_eq!(ri.to_str_radix(16), ri_hex);
     }
 }
 
