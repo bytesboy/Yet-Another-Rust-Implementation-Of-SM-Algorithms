@@ -28,6 +28,7 @@ pub enum Mode {
 
 pub trait Cryptographer {
     fn encrypt_bytes(&self, plain: &[u8]) -> Vec<u8>;
+
     fn decrypt_bytes(&self, cipher: &[u8]) -> Vec<u8>;
 
     fn encrypt(&self, data: String) -> String {
