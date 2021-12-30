@@ -201,7 +201,7 @@ pub static MULTI_BASE_POINT_PRECOMPUTED: [u32; 15 * 2 * 9 * 2] = [
 
 #[derive(Clone, Debug)]
 pub struct P256Elliptic {
-    elliptic: Elliptic,
+    ec: Elliptic,
     ri: BigUint,
 }
 
@@ -213,7 +213,7 @@ impl EllipticProvider for P256Elliptic {
         unsafe {
             ONCE.call_once(|| {
                 let elliptic = P256Elliptic {
-                    elliptic: Elliptic::new(
+                    ec: Elliptic::new(
                         BigUint::from_bytes_be(&EC_P),
                         BigUint::from_bytes_be(&EC_A),
                         BigUint::from_bytes_be(&EC_B),
@@ -238,7 +238,7 @@ impl EllipticProvider for P256Elliptic {
 
 impl P256Elliptic {
     pub fn elliptic(&self) -> &Elliptic {
-        &self.elliptic
+        &self.ec
     }
 }
 
@@ -273,7 +273,7 @@ impl P256Elliptic {
 /// | ------ | ------ | ------ | ------ | ------ | ------ | ------ | ------ | ------ |
 /// |   x8   |   x7   |   x6   |   x5   |   x4   |   x3   |   x2   |   x1   |   x0   |
 struct Limbs {
-    elliptic: P256Elliptic,
+    p256: P256Elliptic,
     data: [u32; 9],
 }
 
@@ -349,7 +349,7 @@ impl Limbs {
             x = BigInt::shr(x, 28);
             i += 2;
         }
-        Limbs { elliptic: p256, data: limbs }
+        Limbs { p256, data: limbs }
     }
 
     ///           limbs = x8
@@ -379,8 +379,8 @@ impl Limbs {
             i -= 1;
         }
         // formula: limbs = data * R mod P  => data = limbs * RI mod p
-        limbs = limbs.mul(self.elliptic.ri.clone().to_bigint().unwrap());
-        limbs = limbs.mod_floor(&self.elliptic.elliptic().p().clone().to_bigint().unwrap());
+        limbs = limbs.mul(self.p256.ri.clone().to_bigint().unwrap());
+        limbs = limbs.mod_floor(&self.p256.elliptic().p().clone().to_bigint().unwrap());
         limbs
     }
 }
