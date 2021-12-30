@@ -1,42 +1,51 @@
-use std::mem;
 use std::ops::{Add, Sub};
-use std::sync::Once;
-use num_bigint::BigUint;
-use num_traits::FromPrimitive;
-use num_integer::Integer;
-use crate::sm2::core::CurveParams;
-use crate::sm2::p256::{BIT_SIZE, EC_A, EC_B, EC_GX, EC_GY, EC_N, EC_P};
 
-/// 公钥 64bytes
+use num_bigint::BigUint;
+use num_integer::Integer;
+use num_traits::FromPrimitive;
+
+use crate::sm2::core::{BasePoint, Elliptic, Multiplication, Point};
+
+
+/// 公钥 非压缩：65bytes 压缩：33bytes
 #[derive(Clone, Debug)]
-struct PublicKey(BigUint, BigUint);
+struct PublicKey(Point);
 
 impl PublicKey {
-    pub fn new(private: &PrivateKey, base: &(BigUint, BigUint)) -> Self {
-        PublicKey((*base).0.clone(), (*base).1.clone())
+    fn new(key: Point) -> Self {
+        PublicKey(key)
+    }
+
+    fn from(private: &PrivateKey, base: &BasePoint) -> Self {
+        PublicKey(base.multiply(private.0.clone()))
     }
 }
+
 
 /// 私钥 32bytes
 #[derive(Clone, Debug)]
 struct PrivateKey(BigUint);
 
 impl PrivateKey {
-    pub fn new(n: &BigUint) -> Self {
-        // private key: 32 bytes
-        let bytes: Vec<u8> = (0..BIT_SIZE / 8 + 8).map(|_| { rand::random::<u8>() }).collect();
-        let mut k = BigUint::from_bytes_be(&bytes);
-        // n-2
-        let n = BigUint::sub((*n).clone(), BigUint::from_u64(2).unwrap());
-        // k % n  ∈ [0, n-1]  => k % (n-2) + 1  ∈ [1, n-2]
-        let key = k.mod_floor(&n).add(BigUint::from_u64(1).unwrap());
-        PrivateKey(key)
+    fn new(key: &BigUint) -> Self {
+        PrivateKey(key.clone())
     }
 }
+
 
 /// 秘钥对（d, P）d:私钥 P:公钥
 #[derive(Debug)]
 struct KeyPair(PrivateKey, PublicKey);
+
+impl KeyPair {
+    pub fn private_key(&self) -> &PrivateKey {
+        &self.0
+    }
+
+    pub fn public_key(&self) -> &PublicKey {
+        &self.1
+    }
+}
 
 
 /// 秘钥生成器
@@ -48,28 +57,12 @@ struct KeyPair(PrivateKey, PublicKey);
 /// y^2 = x^3 + ax + b
 #[derive(Clone, Debug)]
 pub struct KeyGenerator {
-    curve: CurveParams,
+    elliptic: Elliptic,
 }
 
 impl KeyGenerator {
-    pub fn new() -> Self {
-        static mut GENERATOR: *const KeyGenerator = 0 as *const KeyGenerator;
-        static ONCE: Once = Once::new();
-        unsafe {
-            ONCE.call_once(|| {
-                let mut generator = KeyGenerator {
-                    curve: CurveParams {
-                        p: BigUint::from_bytes_be(&EC_P),
-                        a: BigUint::from_bytes_be(&EC_A),
-                        b: BigUint::from_bytes_be(&EC_B),
-                        n: BigUint::from_bytes_be(&EC_N),
-                        g: (BigUint::from_bytes_be(&EC_GX), BigUint::from_bytes_be(&EC_GY)),
-                    }
-                };
-                GENERATOR = mem::transmute(Box::new(generator));
-            });
-            (*GENERATOR).clone()
-        }
+    pub fn new(elliptic: &Elliptic) -> Self {
+        KeyGenerator { elliptic: elliptic.clone() }
     }
 
     /// 输入:一个有效的Fq(q = p且p为大于3的素数，或q = 2m)上椭圆曲线系统参数的集合。
@@ -90,25 +83,63 @@ impl KeyGenerator {
     ///
     /// 随机数生成整数d ∈ \[1, n − 2], n为椭圆曲线循环子群的阶
     fn gen_private_key(&self) -> PrivateKey {
-        PrivateKey::new(&self.curve.n)
+        // private key: 32 bytes
+        let n = self.elliptic.base().order();
+        let bytes: Vec<u8> = (0..self.elliptic.bits() / 8 + 8).map(|_| { rand::random::<u8>() }).collect();
+        let mut k = BigUint::from_bytes_be(&bytes);
+        // n-2
+        let n = BigUint::sub((*n).clone(), BigUint::from_u64(2).unwrap());
+        // k % n  ∈ [0, n-1]  => k % (n-2) + 1  ∈ [1, n-2]
+        let key = k.mod_floor(&n).add(BigUint::from_u64(1).unwrap());
+        PrivateKey::new(&key)
     }
 
     /// 生成公钥
     ///
     /// P = (xP,yP) = \[d]G, G为基点，d为私钥
     fn gen_public_key(&self, private_key: &PrivateKey) -> PublicKey {
-        PublicKey::new(private_key, &self.curve.g)
+        PublicKey::from(private_key, self.elliptic.base())
     }
 }
 
 
 #[cfg(test)]
 mod tests {
-    use crate::sm2::key::KeyGenerator;
+    use num_bigint::BigUint;
+    use num_traits::Num;
+
+    use crate::sm2::core::{BasePoint, Elliptic, EllipticProvider, Point};
+    use crate::sm2::key::{KeyGenerator, PrivateKey, PublicKey};
+    use crate::sm2::p256::P256Elliptic;
 
     #[test]
     fn main() {
-        let prk = KeyGenerator::new().gen_private_key();
-        println!("prk = {:?}", prk);
+        let elliptic = P256Elliptic::initialize();
+        let pair = KeyGenerator::new(elliptic.elliptic()).gen_key_pair();
+        println!("prk = {:?}", pair.private_key());
+        println!("puk = {:?}", pair.public_key());
+
+
+        let elliptic = P256Elliptic::initialize();
+        let pair = KeyGenerator::new(elliptic.elliptic()).gen_key_pair();
+        println!("prk = {:?}", pair.private_key());
+        println!("puk = {:?}", pair.public_key());
+    }
+
+    #[test]
+    fn public_key() {
+        // d: 48358803002808206747871163666773640956067045543241775523137833706911222329998
+        // x: 76298453107918256108319614943154283626396976993715724710320433578462434588530
+        // y: 22016840577845663905050918262284081863871275223913804750000840645022838962798
+
+        let elliptic = P256Elliptic::initialize();
+        let prk = "48358803002808206747871163666773640956067045543241775523137833706911222329998";
+        let prk = BigUint::from_str_radix(prk, 10).unwrap();
+
+        let private_key = PrivateKey(prk);
+        let public_key = PublicKey::from(&private_key, elliptic.elliptic().base());
+
+        println!("PriKey = {:?}", private_key);
+        println!("PubKey = {:?}", public_key);
     }
 }
