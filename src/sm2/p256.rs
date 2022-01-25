@@ -1,15 +1,13 @@
+use std::cmp::Ordering;
 use std::mem;
 use std::ops::{Add, Mul, Shl, Shr};
 use std::sync::Once;
 
-use num_bigint::{BigInt, BigUint, Sign, ToBigInt};
+use num_bigint::{BigInt, BigUint, ToBigInt};
 use num_integer::Integer;
-use num_traits::{FromPrimitive, Num};
+use num_traits::FromPrimitive;
 
-use crate::sm2::core::{BasePoint, Elliptic, EllipticProvider, Point};
-
-const BIT_SIZE: usize = 256;
-const KEY_BYTES: usize = (BIT_SIZE + 7) / 8;
+use crate::sm2::core::{Elliptic, EllipticProvider};
 
 static EC_P: [u8; 32] = [
     0xFF, 0xFF, 0xFF, 0xFE,
@@ -135,7 +133,7 @@ static RI: [u8; 32] = [
 /// precompute(1) => \[u32; 15 * 9 * 2]
 /// precompute(2**32) => \[u32; 15 * 9 * 2]
 /// MULTI_BASE_POINT_PRECOMPUTED = \[precompute(1), precompute(2**32)]
-pub static MULTI_BASE_POINT_PRECOMPUTED: [u32; 15 * 2 * 9 * 2] = [
+static MULTI_BASE_POINT_PRECOMPUTED: [u32; 15 * 2 * 9 * 2] = [
     0x0830053D, 0x0328990F, 0x06C04FE1, 0x0C0F72E5, 0x01E19F3C, 0x0666B093, 0x0175A87B, 0x0EC38276, 0x0222CF4B,
     0x185A1BBA, 0x0354E593, 0x1295FAC1, 0x0F2BC469, 0x047C60FA, 0x0C19B8A9, 0x0F63533E, 0x0903AE6B, 0x0C79ACBA,
     0x15B061A4, 0x033E020B, 0x0DFFB34B, 0x00FCF2C8, 0x16582E08, 0x0262F203, 0x0FB34381, 0x00A55452, 0x0604F0FF,
@@ -198,6 +196,34 @@ pub static MULTI_BASE_POINT_PRECOMPUTED: [u32; 15 * 2 * 9 * 2] = [
     0x011902A0, 0x06C29CC9, 0x1D5FFBE6, 0x0DB0B4C7, 0x10144C14, 0x02F2B719, 0x00301189, 0x02343336, 0x0A0BF2AC,
 ];
 
+static P256CARRY: [u32; 8 * 9] = [
+    0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    0x00000002, 0x00000000, 0x1FFFFF00, 0x000007FF, 0x00000000, 0x00000000, 0x00000000, 0x02000000, 0x00000000,
+    0x00000004, 0x00000000, 0x1FFFFE00, 0x00000FFF, 0x00000000, 0x00000000, 0x00000000, 0x04000000, 0x00000000,
+    0x00000006, 0x00000000, 0x1FFFFD00, 0x000017FF, 0x00000000, 0x00000000, 0x00000000, 0x06000000, 0x00000000,
+    0x00000008, 0x00000000, 0x1FFFFC00, 0x00001FFF, 0x00000000, 0x00000000, 0x00000000, 0x08000000, 0x00000000,
+    0x0000000A, 0x00000000, 0x1FFFFB00, 0x000027FF, 0x00000000, 0x00000000, 0x00000000, 0x0A000000, 0x00000000,
+    0x0000000C, 0x00000000, 0x1FFFFA00, 0x00002FFF, 0x00000000, 0x00000000, 0x00000000, 0x0C000000, 0x00000000,
+    0x0000000E, 0x00000000, 0x1FFFF900, 0x000037FF, 0x00000000, 0x00000000, 0x00000000, 0x0E000000, 0x00000000,
+];
+
+static P256ZERO31: [u32; 9] = [
+    0x7FFFFFF8, 0x3FFFFFFC, 0x800003FC, 0x3FFFDFFC, 0x7FFFFFFC, 0x3FFFFFFC, 0x7FFFFFFC, 0x37FFFFFC, 0x7FFFFFFC
+];
+
+
+static P256FACTOR: [[u32; 9]; 9] = [
+    [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000],
+    [0x00000002, 0x00000000, 0x1FFFFF00, 0x000007FF, 0x00000000, 0x00000000, 0x00000000, 0x02000000, 0x00000000],
+    [0x00000004, 0x00000000, 0x1FFFFE00, 0x00000FFF, 0x00000000, 0x00000000, 0x00000000, 0x04000000, 0x00000000],
+    [0x00000006, 0x00000000, 0x1FFFFD00, 0x000017FF, 0x00000000, 0x00000000, 0x00000000, 0x06000000, 0x00000000],
+    [0x00000008, 0x00000000, 0x1FFFFC00, 0x00001FFF, 0x00000000, 0x00000000, 0x00000000, 0x08000000, 0x00000000],
+    [0x0000000A, 0x00000000, 0x1FFFFB00, 0x000027FF, 0x00000000, 0x00000000, 0x00000000, 0x0A000000, 0x00000000],
+    [0x0000000C, 0x00000000, 0x1FFFFA00, 0x00002FFF, 0x00000000, 0x00000000, 0x00000000, 0x0C000000, 0x00000000],
+    [0x0000000E, 0x00000000, 0x1FFFF900, 0x000037FF, 0x00000000, 0x00000000, 0x00000000, 0x0E000000, 0x00000000],
+    [0x00000010, 0x00000000, 0x1FFFF800, 0x00003FFF, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000001],
+];
+
 
 #[derive(Clone, Debug)]
 pub struct P256Elliptic {
@@ -205,27 +231,22 @@ pub struct P256Elliptic {
     ri: BigUint,
 }
 
-
-impl EllipticProvider for P256Elliptic {
-    fn initialize() -> Self {
+impl P256Elliptic {
+    pub fn init() -> Self {
         static mut ELLIPTIC: *const P256Elliptic = 0 as *const P256Elliptic;
         static ONCE: Once = Once::new();
         unsafe {
             ONCE.call_once(|| {
                 let elliptic = P256Elliptic {
-                    ec: Elliptic::new(
-                        BigUint::from_bytes_be(&EC_P),
-                        BigUint::from_bytes_be(&EC_A),
-                        BigUint::from_bytes_be(&EC_B),
-                        BasePoint::new(
-                            Point::new(
-                                BigUint::from_bytes_be(&EC_GX),
-                                BigUint::from_bytes_be(&EC_GY),
-                            ),
-                            BigUint::from_bytes_be(&EC_N),
-                        ),
-                        BIT_SIZE,
-                    ),
+                    ec: Elliptic {
+                        p: BigUint::from_bytes_be(&EC_P),
+                        a: BigUint::from_bytes_be(&EC_A),
+                        b: BigUint::from_bytes_be(&EC_B),
+                        gx: BigUint::from_bytes_be(&EC_GX),
+                        gy: BigUint::from_bytes_be(&EC_GY),
+                        n: BigUint::from_bytes_be(&EC_N),
+                        bits: 256,
+                    },
                     ri: BigUint::from_bytes_be(&RI),
                 };
                 ELLIPTIC = mem::transmute(Box::new(elliptic));
@@ -235,10 +256,68 @@ impl EllipticProvider for P256Elliptic {
     }
 }
 
-
-impl P256Elliptic {
-    pub fn elliptic(&self) -> &Elliptic {
+impl EllipticProvider for P256Elliptic {
+    fn blueprint(&self) -> &Elliptic {
         &self.ec
+    }
+
+    fn scalar_multiply(&self, x: BigUint, y: BigUint, k: BigUint) -> (BigUint, BigUint) {
+        let point = P256Point(x.clone(), y.clone());
+        let p = point.multiply(k);
+        (p.0, p.1)
+    }
+
+    fn scalar_base_multiply(&self, k: BigUint) -> (BigUint, BigUint) {
+        let elliptic = self.ec.clone();
+        let base = P256BasePoint {
+            point: P256Point(elliptic.gx.clone(), elliptic.gy.clone()),
+            order: elliptic.n.clone(),
+        };
+        let p = base.multiply(k);
+        (p.0, p.1)
+    }
+}
+
+trait Multiplication {
+    fn multiply(&self, scalar: BigUint) -> P256Point;
+}
+
+/// Jacobian coordinates: (x, y, z)  y^2 = x^3 + axz^4 + bz^6
+/// Affine coordinates: (X = x/z^2, Y = y/z^3)  Y^2 = X^3 + aX +b
+#[derive(Clone, Debug)]
+struct P256Point(BigUint, BigUint);
+
+/// 基点
+#[derive(Clone, Debug)]
+struct P256BasePoint {
+    point: P256Point,
+    order: BigUint,
+}
+
+impl Multiplication for P256Point {
+    fn multiply(&self, scalar: BigUint) -> P256Point {
+        todo!()
+    }
+}
+
+impl Multiplication for P256BasePoint {
+    fn multiply(&self, scalar: BigUint) -> P256Point {
+        let scalar = {
+            // compare scalar and order, n = (scalar mod order) if scalar > order else scalar
+            if let Ordering::Greater = scalar.cmp(&self.order) {
+                scalar.mod_floor(&self.order)
+            } else {
+                scalar
+            }
+        };
+
+        let mut scalar_bytes = [0u8; 32];
+        for (i, v) in scalar.to_bytes_le().iter().enumerate() {
+            scalar_bytes[i] = *v;
+        }
+
+
+        self.point.clone()
     }
 }
 
@@ -259,7 +338,6 @@ impl P256Elliptic {
 ///
 /// ***
 /// ### Pattern
-/// * bits-256: |28bits|29bits|29bits|28bits|29bits|29bits|28bits|29bits|28bits|
 /// * bits-257: |29bits|28bits|29bits|29bits|28bits|29bits|29bits|28bits|29bits|
 ///
 /// Finally, the values stored in a field element are in Montgomery form.
@@ -272,27 +350,28 @@ impl P256Elliptic {
 /// | 29bits | 28bits | 29bits | 28bits | 29bits | 28bits | 29bits | 28bits | 29bits |
 /// | ------ | ------ | ------ | ------ | ------ | ------ | ------ | ------ | ------ |
 /// |   x8   |   x7   |   x6   |   x5   |   x4   |   x3   |   x2   |   x1   |   x0   |
-struct Limbs {
-    p256: P256Elliptic,
+///
+/// 0xFFFFFFF  = 1111111111111111111111111111
+/// 0x1FFFFFFF = 11111111111111111111111111111
+enum LimbPattern {
+    P28BITS = 0xFFFFFFF,
+    P29BITS = 0x1FFFFFFF,
+}
+
+struct PayLoad {
     data: [u32; 9],
 }
 
-/// 0xFFFFFFF  = 1111111111111111111111111111
-/// 0x1FFFFFFF = 11111111111111111111111111111
-pub enum LimbsPattern {
-    BOTTOM28BITS = 0xFFFFFFF,
-    BOTTOM29BITS = 0x1FFFFFFF,
-}
+struct PayLoadHelper;
 
-
-impl Limbs {
+impl PayLoadHelper {
     /// ### Example
     ///
-    /// data: 115792089210356248756420345214020892766250353991924191454421193933289684991996
+    /// n: 115792089210356248756420345214020892766250353991924191454421193933289684991996
     ///
     /// * step 1 :
     ///     ```
-    ///     x = (data * 2^257) % p;
+    ///     x = (n * 2^257) % p;
     ///     x = 115792089048596568753516506446018802244132569949625955944202853485549017104377
     ///       = 1111111111111111111111111111100011111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111001000000000000000000000000000001101111111111111111111111111111111111111111111111111111111111111001
     ///     ```
@@ -316,86 +395,87 @@ impl Limbs {
     ///     + step 2.2.3: right shift 28 bits.
     /// * step 3: get the result
     ///     ```
-    ///     limbs = [536870905, 268435455, 895, 268428288, 536870911, 268435455, 536870911, 150994943, 268435455]
-    ///     ```
-    pub fn new(p256: P256Elliptic, data: BigInt) -> Self {
-        let mut limbs: [u32; 9] = [0; 9];
-        // limbs = data * R mod P = data * 2^257 % p256.p
-        let mut x: BigInt = BigInt::shl(data.clone(), 257);
-        x = x.mod_floor(&p256.elliptic().p().clone().to_bigint().unwrap());
+    ///     data = [536870905, 268435455, 895, 268428288, 536870911, 268435455, 536870911, 150994943, 268435455]
+    fn create(n: &BigInt) -> PayLoad {
+        let elliptic = P256Elliptic::init();
+
+        let mut data: [u32; 9] = [0; 9];
+        // data = n * R mod P = n * 2^257 % p256.p
+        let mut x: BigInt = BigInt::shl(n.clone(), 257);
+        x = x.mod_floor(&elliptic.ec.p.clone().to_bigint().unwrap());
         let mut i: usize = 0;
         while i < 9 {
-            // x -> [u64]
+            // x -> [u32]
             let bits = x.to_u32_digits().1;
             if bits.len() > 0 {
                 // extract 29 bits using operator &
-                limbs[i] = bits[0] & (LimbsPattern::BOTTOM29BITS as u32);
+                data[i] = bits[0] & (LimbPattern::P29BITS as u32);
             } else {
-                limbs[i] = 0
+                data[i] = 0
             }
             // right shift 29 bits
             x = BigInt::shr(x, 29);
-            if i + 1 == 9 {
+            i += 1;
+            if i == 9 {
                 break;
             }
             let bits = x.to_u32_digits().1;
             if bits.len() > 0 {
                 // extract 28 bits using operator &
-                limbs[i + 1] = bits[0] & (LimbsPattern::BOTTOM28BITS as u32);
+                data[i] = bits[0] & (LimbPattern::P28BITS as u32);
             } else {
-                limbs[i + 1] = 0
+                data[i] = 0
             }
             // right shift 28 bits
             x = BigInt::shr(x, 28);
-            i += 2;
+            i += 1;
         }
-        Limbs { p256, data: limbs }
+        PayLoad { data }
     }
 
-    ///           limbs = x8
-    /// * i=7  => limbs = limbs * 2^28 + x7 = x8 * 2^28 + x7
-    /// * i=6  => limbs = limbs * 2^29 + x6 = x8 * 2^57 + x7 * 2^29 + x6
-    /// * i=5  => limbs = limbs * 2^28 + x5 = x8 * 2^85 + x7 * 2^57 + x6 * 2^28 + x5
-    /// * i=4  => limbs = limbs * 2^29 + x4 = x8 * 2^114 + x7 * 2^86 + x6 * 2^57 + x5 * 2^29 + x4
-    /// * i=3  => limbs = limbs * 2^28 + x3 = x8 * 2^142 + x7 * 2^114 + x6 * 2^85 + x5 * 2^57 + x4 * 2^28 + x3
-    /// * i=2  => limbs = limbs * 2^29 + x2 = x8 * 2^171 + x7 * 2^143 + x6 * 2^114 + x5 * 2^86 + x4 * 2^57 + x3 * 2^29 + x2
-    /// * i=1  => limbs = limbs * 2^28 + x1 = x8 * 2^199 + x7 * 2^171 + x6 * 2^142 + x5 * 2^114 + x4 * 2^85 + x3 * 2^57 + x2 * 2^28 + x1
-    /// * i=0  => limbs = limbs * 2^29 + x0 = x8 * 2^228 + x7 * 2^200 + x6 * 2^171 + x5 * 2^143 + x4 * 2^114 + x3 * 2^86 + x2 * 2^57 + x1 * 2^29 + x0
-    pub fn to_big_int(&self) -> BigInt {
-        let mut limbs = BigInt::from_u32(self.data[8]).unwrap();
+    ///           n = x8
+    /// * i=7  => n = n * 2^28 + x7 = x8 * 2^28 + x7
+    /// * i=6  => n = n * 2^29 + x6 = x8 * 2^57 + x7 * 2^29 + x6
+    /// * i=5  => n = n * 2^28 + x5 = x8 * 2^85 + x7 * 2^57 + x6 * 2^28 + x5
+    /// * i=4  => n = n * 2^29 + x4 = x8 * 2^114 + x7 * 2^86 + x6 * 2^57 + x5 * 2^29 + x4
+    /// * i=3  => n = n * 2^28 + x3 = x8 * 2^142 + x7 * 2^114 + x6 * 2^85 + x5 * 2^57 + x4 * 2^28 + x3
+    /// * i=2  => n = n * 2^29 + x2 = x8 * 2^171 + x7 * 2^143 + x6 * 2^114 + x5 * 2^86 + x4 * 2^57 + x3 * 2^29 + x2
+    /// * i=1  => n = n * 2^28 + x1 = x8 * 2^199 + x7 * 2^171 + x6 * 2^142 + x5 * 2^114 + x4 * 2^85 + x3 * 2^57 + x2 * 2^28 + x1
+    /// * i=0  => n = n * 2^29 + x0 = x8 * 2^228 + x7 * 2^200 + x6 * 2^171 + x5 * 2^143 + x4 * 2^114 + x3 * 2^86 + x2 * 2^57 + x1 * 2^29 + x0
+    ///
+    /// result = n * RI mod p
+    fn restore(payload: &PayLoad) -> BigInt {
+        let elliptic = P256Elliptic::init();
+        let mut n = BigInt::from_u32(payload.data[8]).unwrap();
         let mut temp: BigInt;
         let mut i: isize = 7;
         while i >= 0 {
             // i & 1 = 0 => i is even, else i is odd
             if (i & 1) == 0 {
                 // even index, limb * 2^29
-                limbs = limbs.shl(29);
+                n = n.shl(29);
             } else {
                 // odd index, limb * 2^28
-                limbs = limbs.shl(28);
+                n = n.shl(28);
             }
-            temp = BigInt::from_u32(self.data[i as usize]).unwrap();
-            limbs = limbs.add(temp);
+            temp = BigInt::from_u32(payload.data[i as usize]).unwrap();
+            n = n.add(temp);
             i -= 1;
         }
-        // formula: limbs = data * R mod P  => data = limbs * RI mod p
-        limbs = limbs.mul(self.p256.ri.clone().to_bigint().unwrap());
-        limbs = limbs.mod_floor(&self.p256.elliptic().p().clone().to_bigint().unwrap());
-        limbs
+        // formula: data = n * R mod P  => n = data * RI mod p
+        n = n.mul(elliptic.ri.clone().to_bigint().unwrap());
+        n = n.mod_floor(&elliptic.ec.p.clone().to_bigint().unwrap());
+        n
     }
 }
 
 
 #[cfg(test)]
 mod tests {
-    use std::ops::{Mul, Shl};
-
-    use num_bigint::{BigInt, BigUint, Sign};
-    use num_integer::Integer;
+    use num_bigint::Sign;
     use num_traits::Num;
 
-    use crate::sm2::core::EllipticProvider;
-    use crate::sm2::p256::{EC_P, Limbs, P256Elliptic};
+    use super::*;
 
     #[test]
     fn ri() {
@@ -411,20 +491,35 @@ mod tests {
         assert_eq!(ri.to_str_radix(16), ri_hex);
     }
 
-
     #[test]
-    fn limbs() {
-        let elliptic = P256Elliptic::initialize();
-        let data = "115792089210356248756420345214020892766250353991924191454421193933289684991996";
-        let data = BigInt::from_str_radix(data, 10).unwrap();
-        let limbs = Limbs::new(elliptic, data.clone());
-        assert_eq!(limbs.data, [
+    fn payload() {
+        let n = "115792089210356248756420345214020892766250353991924191454421193933289684991996";
+        let n = BigInt::from_str_radix(n, 10).unwrap();
+
+        let payload = PayLoadHelper::create(&n);
+
+        assert_eq!(payload.data, [
             536870905, 268435455, 895,
             268428288, 536870911, 268435455,
             536870911, 150994943, 268435455
         ]);
 
-        let n = limbs.to_big_int();
-        assert_eq!(n, data);
+        let m = PayLoadHelper::restore(&payload);
+        assert_eq!(m, n);
+    }
+
+    #[test]
+    fn carry_table() {
+        let mut table: [u32; 8 * 9] = [0; 72];
+        for i in 0..8 {
+            let value = BigInt::from(i as i64);
+            let payload = PayLoadHelper::create(&&value);
+            for (j, e) in payload.data.iter().enumerate() {
+                table[i * 9 + j] = *e;
+                print!("0x{:>08X}, ", *e);
+            }
+            println!();
+        }
+        assert_eq!(table, P256CARRY)
     }
 }
