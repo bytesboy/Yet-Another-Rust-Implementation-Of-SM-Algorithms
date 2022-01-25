@@ -211,7 +211,6 @@ static P256ZERO31: [u32; 9] = [
     0x7FFFFFF8, 0x3FFFFFFC, 0x800003FC, 0x3FFFDFFC, 0x7FFFFFFC, 0x3FFFFFFC, 0x7FFFFFFC, 0x37FFFFFC, 0x7FFFFFFC
 ];
 
-
 static P256FACTOR: [[u32; 9]; 9] = [
     [0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000],
     [0x00000002, 0x00000000, 0x1FFFFF00, 0x000007FF, 0x00000000, 0x00000000, 0x00000000, 0x02000000, 0x00000000],
@@ -358,13 +357,15 @@ enum LimbPattern {
     P29BITS = 0x1FFFFFFF,
 }
 
+type Limbs = PayLoad;
+
 struct PayLoad {
     data: [u32; 9],
 }
 
-struct PayLoadHelper;
+struct LimbsHelper;
 
-impl PayLoadHelper {
+impl LimbsHelper {
     /// ### Example
     ///
     /// n: 115792089210356248756420345214020892766250353991924191454421193933289684991996
@@ -396,11 +397,10 @@ impl PayLoadHelper {
     /// * step 3: get the result
     ///     ```
     ///     data = [536870905, 268435455, 895, 268428288, 536870911, 268435455, 536870911, 150994943, 268435455]
-    fn transform(n: &BigInt) -> PayLoad {
+    fn transform(n: &BigInt) -> Limbs {
         let elliptic = P256Elliptic::init();
-
         let mut data: [u32; 9] = [0; 9];
-        // data = n * R mod P = n * 2^257 % p256.p
+        // data = n * R mod p = n * 2^257 % p
         let mut x: BigInt = BigInt::shl(n.clone(), 257);
         x = x.mod_floor(&elliptic.ec.p.clone().to_bigint().unwrap());
         let mut i: usize = 0;
@@ -430,7 +430,7 @@ impl PayLoadHelper {
             x = BigInt::shr(x, 28);
             i += 1;
         }
-        PayLoad { data }
+        Limbs { data }
     }
 
     ///           n = x8
@@ -444,9 +444,9 @@ impl PayLoadHelper {
     /// * i=0  => n = n * 2^29 + x0 = x8 * 2^228 + x7 * 2^200 + x6 * 2^171 + x5 * 2^143 + x4 * 2^114 + x3 * 2^86 + x2 * 2^57 + x1 * 2^29 + x0
     ///
     /// result = n * RI mod p
-    fn restore(payload: &PayLoad) -> BigInt {
+    fn restore(limbs: &Limbs) -> BigInt {
         let elliptic = P256Elliptic::init();
-        let mut n = BigInt::from_u32(payload.data[8]).unwrap();
+        let mut n = BigInt::from_u32(limbs.data[8]).unwrap();
         let mut temp: BigInt;
         let mut i: isize = 7;
         while i >= 0 {
@@ -458,7 +458,7 @@ impl PayLoadHelper {
                 // odd index, limb * 2^28
                 n = n.shl(28);
             }
-            temp = BigInt::from_u32(payload.data[i as usize]).unwrap();
+            temp = BigInt::from_u32(limbs.data[i as usize]).unwrap();
             n = n.add(temp);
             i -= 1;
         }
@@ -467,6 +467,13 @@ impl PayLoadHelper {
         n = n.mod_floor(&elliptic.ec.p.clone().to_bigint().unwrap());
         n
     }
+}
+
+
+struct PayLoadHelper;
+
+impl PayLoadHelper {
+
 }
 
 
@@ -495,13 +502,13 @@ mod tests {
     fn payload() {
         let n = "115792089210356248756420345214020892766250353991924191454421193933289684991996";
         let n = BigInt::from_str_radix(n, 10).unwrap();
-        let payload = PayLoadHelper::transform(&n);
-        assert_eq!(payload.data, [
+        let limbs = LimbsHelper::transform(&n);
+        assert_eq!(limbs.data, [
             536870905, 268435455, 895,
             268428288, 536870911, 268435455,
             536870911, 150994943, 268435455
         ]);
-        let m = PayLoadHelper::restore(&payload);
+        let m = LimbsHelper::restore(&limbs);
         assert_eq!(m, n);
     }
 
@@ -510,8 +517,8 @@ mod tests {
         let mut table: [u32; 8 * 9] = [0; 72];
         for i in 0..8 {
             let value = BigInt::from(i as i64);
-            let payload = PayLoadHelper::transform(&&value);
-            for (j, e) in payload.data.iter().enumerate() {
+            let limbs = LimbsHelper::transform(&value);
+            for (j, e) in limbs.data.iter().enumerate() {
                 table[i * 9 + j] = *e;
                 print!("0x{:>08X}, ", *e);
             }
