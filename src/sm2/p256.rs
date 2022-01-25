@@ -396,7 +396,7 @@ impl PayLoadHelper {
     /// * step 3: get the result
     ///     ```
     ///     data = [536870905, 268435455, 895, 268428288, 536870911, 268435455, 536870911, 150994943, 268435455]
-    fn create(n: &BigInt) -> PayLoad {
+    fn transform(n: &BigInt) -> PayLoad {
         let elliptic = P256Elliptic::init();
 
         let mut data: [u32; 9] = [0; 9];
@@ -495,15 +495,12 @@ mod tests {
     fn payload() {
         let n = "115792089210356248756420345214020892766250353991924191454421193933289684991996";
         let n = BigInt::from_str_radix(n, 10).unwrap();
-
-        let payload = PayLoadHelper::create(&n);
-
+        let payload = PayLoadHelper::transform(&n);
         assert_eq!(payload.data, [
             536870905, 268435455, 895,
             268428288, 536870911, 268435455,
             536870911, 150994943, 268435455
         ]);
-
         let m = PayLoadHelper::restore(&payload);
         assert_eq!(m, n);
     }
@@ -513,7 +510,7 @@ mod tests {
         let mut table: [u32; 8 * 9] = [0; 72];
         for i in 0..8 {
             let value = BigInt::from(i as i64);
-            let payload = PayLoadHelper::create(&&value);
+            let payload = PayLoadHelper::transform(&&value);
             for (j, e) in payload.data.iter().enumerate() {
                 table[i * 9 + j] = *e;
                 print!("0x{:>08X}, ", *e);
