@@ -49,7 +49,7 @@ impl KeyGenerator {
         let elliptic = self.elliptic.blueprint();
         let n = &elliptic.n;
         let bytes: Vec<u8> = (0..elliptic.bits / 8 + 8).map(|_| { rand::random::<u8>() }).collect();
-        let mut k = BigUint::from_bytes_be(&bytes);
+        let k = BigUint::from_bytes_be(&bytes);
         // n-2
         let n = BigUint::sub((*n).clone(), BigUint::from_u64(2).unwrap());
         // k % n  ∈ [0, n-1]  => k % (n-2) + 1  ∈ [1, n-2]
