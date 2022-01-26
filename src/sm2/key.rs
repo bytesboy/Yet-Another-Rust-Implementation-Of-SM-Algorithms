@@ -70,7 +70,7 @@ impl KeyGenerator {
 #[cfg(test)]
 mod tests {
     use num_traits::Num;
-    use crate::sm2::p256::P256Elliptic;
+    use crate::sm2::p256::core::P256Elliptic;
     use super::*;
 
     #[test]
