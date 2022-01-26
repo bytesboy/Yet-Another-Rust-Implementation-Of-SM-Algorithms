@@ -563,8 +563,7 @@ impl PayloadHelper {
                 x_mask = Self::mask(x);
                 tmp[i + 2] += (x << 7) & LimbPattern::WIDTH29BITS;
                 tmp[i + 3] += x >> 22;
-                // At position 86, which is the starting bit position for word 3, we
-                // have a factor of 0xffffc00 = 2**28 - 2**10
+
                 if tmp[i + 3] < 0x10000000 {
                     set4 = 1;
                     tmp[i + 3] += 0x10000000 & x_mask;
@@ -593,8 +592,7 @@ impl PayloadHelper {
                     tmp[i + 4] -= set4;
                     tmp[i + 4] -= x >> 18;
                 }
-                // At position 200, which is the starting bit position for word 7, we
-                // have a factor of 0xeffffff = 2**28 - 2**24 - 1
+
                 if tmp[i + 7] < 0x10000000 {
                     tmp[i + 7] += 0x10000000 & x_mask;
                     tmp[i + 7] -= set7;
@@ -639,8 +637,7 @@ impl PayloadHelper {
                 x_mask = Self::mask(x);
                 tmp[i + 3] += (x << 7) & LimbPattern::WIDTH28BITS;
                 tmp[i + 4] += x >> 21;
-                // At position 85, which is the starting bit position for word 3, we
-                // have a factor of 0x1ffff800 = 2**29 - 2**11
+
                 if tmp[i + 4] < 0x20000000 {
                     set5 = 1;
                     tmp[i + 4] += 0x20000000 & x_mask;
