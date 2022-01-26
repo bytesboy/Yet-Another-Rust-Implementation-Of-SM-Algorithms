@@ -538,13 +538,31 @@ impl Payload {
         result
     }
 
-    fn sub(&self, other: Payload) -> Payload {
-        todo!()
+    fn subtract(&self, other: Payload) -> Payload {
+        let mut result = Payload::init();
+        let mut carry: u32 = 0;
+        let mut i = 0;
+        loop {
+            let x = self.data[i].wrapping_sub(other.data[i]).wrapping_add(P256ZERO31[i]).wrapping_add(carry);
+            carry = x.shr(29);
+            result.data[i] = x & (LimbPattern::WIDTH29BITS as u32);
+            i += 1;
+            if i == 9 {
+                break;
+            }
+            let x = self.data[i].wrapping_sub(other.data[i]).wrapping_add(P256ZERO31[i]).wrapping_add(carry);
+            carry = x.shr(28);
+            result.data[i] = x & (LimbPattern::WIDTH28BITS as u32);
+            i += 1;
+        }
+        PayloadHelper::reduce_carry(&mut result, carry as usize);
+        result
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::ops::Sub;
     use num_bigint::Sign;
     use num_traits::Num;
 
@@ -609,5 +627,64 @@ mod tests {
             println!();
         }
         assert_eq!(table, P256FACTOR)
+    }
+
+    #[test]
+    fn zero31() {
+        let limbs_to_big = |p: [u32; 9]| {
+            let mut n = BigInt::from_u32(p[8]).unwrap();
+            let mut i: isize = 7;
+            while i >= 0 {
+                if (i & 1) == 0 {
+                    n = n.shl(29);
+                } else {
+                    n = n.shl(28);
+                }
+                n = n.add(BigInt::from_u32(p[i as usize]).unwrap());
+                i -= 1;
+            }
+            n
+        };
+        let result = limbs_to_big(
+            [1 << 31, 1 << 30, 1 << 31, 1 << 30, 1 << 31, 1 << 30, 1 << 31, 1 << 30, 1 << 31]
+        );
+        let p256 = P256Elliptic::init();
+        let mut temp = result.mod_floor(&p256.ec.p.to_bigint().unwrap());
+        temp = result.sub(temp);
+
+        let mut out: [u32; 9] = [0; 9];
+        let mut i: usize = 0;
+        while i < 9 {
+            let bits = temp.to_u64_digits().1;
+            if !bits.is_empty() {
+                out[i] = (bits[0] as u32) & 0x7fffffff;
+                if out[i] < 0x70000000 {
+                    out[i] += 0x80000000;
+                }
+            } else {
+                out[i] = 0x80000000
+            }
+            temp = temp.sub(BigInt::from_u64(out[i] as u64).unwrap());
+            temp = temp.shr(29);
+            i += 1;
+            if i == 9 {
+                break;
+            }
+            let bits = temp.to_u64_digits().1;
+            if !bits.is_empty() {
+                out[i] = (bits[0] as u32) & 0x3fffffff;
+                if out[i] < 0x30000000 {
+                    out[i] += 0x40000000;
+                }
+            } else {
+                out[i] = 0x40000000;
+            }
+            temp = temp.sub(BigInt::from_u64(out[i] as u64).unwrap());
+            temp = temp.shr(28);
+            i += 1;
+        }
+
+        println!("{:08X?}", out);
+        assert_eq!(out, P256ZERO31);
     }
 }
