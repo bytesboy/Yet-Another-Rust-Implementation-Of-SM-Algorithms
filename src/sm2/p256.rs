@@ -469,6 +469,12 @@ impl PayloadHelper {
         n
     }
 
+    /// 0xffffffff for 0 < x <= 2^31  0xffffffff = 4294967295 = u32::MAX = 2^31 - 1
+    /// 0 for x == 0 or x > 2^31.
+    fn mask(x: u32) -> u32 {
+        x.wrapping_sub(1).wrapping_shr(31).wrapping_sub(1)
+    }
+
 
     /// reduce_carry adds a multiple of p in order to cancel |carry|,which is a term at 2^257.
     ///
@@ -513,22 +519,22 @@ impl PayloadHelper {
         let mut x: u32;
         let mut x_mask: u32;
 
-        tmp[0] = (b[0] as u32) & LimbPattern::WIDTH29BITS;
+        tmp[0] = (b[0] as u32) & (LimbPattern::WIDTH29BITS as u32);
         tmp[1] = (b[0] as u32) >> 29;
-        tmp[1] |= (((b[0] >> 32) as u32) << 3) & LimbPattern::WIDTH28BITS;
-        tmp[1] += (b[1] as u32) & LimbPattern::WIDTH28BITS;
+        tmp[1] |= (((b[0] >> 32) as u32) << 3) & (LimbPattern::WIDTH28BITS as u32);
+        tmp[1] += (b[1] as u32) & (LimbPattern::WIDTH28BITS as u32);
         carry = tmp[1] >> 28;
-        tmp[1] &= LimbPattern::WIDTH28BITS;
+        tmp[1] &= LimbPattern::WIDTH28BITS as u32;
 
         let mut i = 2;
         while i < 17 {
             tmp[i] = ((b[i - 2] >> 32) as u32) >> 25;
             tmp[i] += ((b[i - 1]) as u32) >> 28;
-            tmp[i] += (((b[i - 1] >> 32) as u32) << 4) & LimbPattern::WIDTH29BITS;
-            tmp[i] += (b[i] as u32) & LimbPattern::WIDTH29BITS;
+            tmp[i] += (((b[i - 1] >> 32) as u32) << 4) & (LimbPattern::WIDTH29BITS as u32);
+            tmp[i] += (b[i] as u32) & (LimbPattern::WIDTH29BITS as u32);
             tmp[i] += carry;
             carry = tmp[i] >> 29;
-            tmp[i] &= LimbPattern::WIDTH29BITS;
+            tmp[i] &= (LimbPattern::WIDTH29BITS as u32);
 
             i += 1;
             if i == 17 {
@@ -537,11 +543,11 @@ impl PayloadHelper {
 
             tmp[i] = ((b[i - 2] >> 32) as u32) >> 25;
             tmp[i] += (b[i - 1] as u32) >> 29;
-            tmp[i] += (((b[i - 1] >> 32) as u32) << 3) & LimbPattern::WIDTH28BITS;
-            tmp[i] += (b[i] as u32) & LimbPattern::WIDTH28BITS;
+            tmp[i] += (((b[i - 1] >> 32) as u32) << 3) & (LimbPattern::WIDTH28BITS as u32);
+            tmp[i] += (b[i] as u32) & (LimbPattern::WIDTH28BITS as u32);
             tmp[i] += carry;
             carry = tmp[i] >> 28;
-            tmp[i] &= LimbPattern::WIDTH28BITS;
+            tmp[i] &= LimbPattern::WIDTH28BITS as u32;
 
             i += 1
         }
@@ -554,22 +560,22 @@ impl PayloadHelper {
         i = 0;
         loop {
             tmp[i + 1] += tmp[i] >> 29;
-            x = tmp[i] & LimbPattern::WIDTH29BITS;
+            x = tmp[i] & (LimbPattern::WIDTH29BITS as u32);
             tmp[i] = 0;
 
             if x > 0 {
                 let mut set4: u32 = 0;
                 let mut set7: u32 = 0;
                 x_mask = Self::mask(x);
-                tmp[i + 2] += (x << 7) & LimbPattern::WIDTH29BITS;
+                tmp[i + 2] += (x << 7) & (LimbPattern::WIDTH29BITS as u32);
                 tmp[i + 3] += x >> 22;
 
                 if tmp[i + 3] < 0x10000000 {
                     set4 = 1;
                     tmp[i + 3] += 0x10000000 & x_mask;
-                    tmp[i + 3] -= (x << 10) & LimbPattern::WIDTH28BITS;
+                    tmp[i + 3] -= (x << 10) & (LimbPattern::WIDTH28BITS as u32);
                 } else {
-                    tmp[i + 3] -= (x << 10) & LimbPattern::WIDTH28BITS;
+                    tmp[i + 3] -= (x << 10) & (LimbPattern::WIDTH28BITS as u32);
                 }
                 if tmp[i + 4] < 0x20000000 {
                     tmp[i + 4] += 0x20000000 & x_mask;
@@ -596,8 +602,8 @@ impl PayloadHelper {
                 if tmp[i + 7] < 0x10000000 {
                     tmp[i + 7] += 0x10000000 & x_mask;
                     tmp[i + 7] -= set7;
-                    tmp[i + 7] -= (x << 24) & LimbPattern::WIDTH28BITS;
-                    tmp[i + 8] += (x << 28) & LimbPattern::WIDTH29BITS;
+                    tmp[i + 7] -= (x << 24) & (LimbPattern::WIDTH28BITS as u32);
+                    tmp[i + 8] += (x << 28) & (LimbPattern::WIDTH29BITS as u32);
                     if tmp[i + 8] < 0x20000000 {
                         tmp[i + 8] += 0x20000000 & x_mask;
                         tmp[i + 8] -= 1;
@@ -610,8 +616,8 @@ impl PayloadHelper {
                     }
                 } else {
                     tmp[i + 7] -= set7;
-                    tmp[i + 7] -= (x << 24) & LimbPattern::WIDTH28BITS;
-                    tmp[i + 8] += (x << 28) & LimbPattern::WIDTH29BITS;
+                    tmp[i + 7] -= (x << 24) & (LimbPattern::WIDTH28BITS as u32);
+                    tmp[i + 8] += (x << 28) & (LimbPattern::WIDTH29BITS as u32);
                     if tmp[i + 8] < 0x20000000 {
                         tmp[i + 8] += 0x20000000 & x_mask;
                         tmp[i + 8] -= x >> 4;
@@ -627,7 +633,7 @@ impl PayloadHelper {
                 break;
             }
             tmp[i + 2] += tmp[i + 1] >> 28;
-            x = tmp[i + 1] & LimbPattern::WIDTH28BITS;
+            x = tmp[i + 1] & (LimbPattern::WIDTH28BITS as u32);
             tmp[i + 1] = 0;
 
             if x > 0 {
@@ -635,15 +641,15 @@ impl PayloadHelper {
                 let mut set8 = 0;
                 let mut set9 = 0;
                 x_mask = Self::mask(x);
-                tmp[i + 3] += (x << 7) & LimbPattern::WIDTH28BITS;
+                tmp[i + 3] += (x << 7) & (LimbPattern::WIDTH28BITS as u32);
                 tmp[i + 4] += x >> 21;
 
                 if tmp[i + 4] < 0x20000000 {
                     set5 = 1;
                     tmp[i + 4] += 0x20000000 & x_mask;
-                    tmp[i + 4] -= (x << 11) & LimbPattern::WIDTH29BITS;
+                    tmp[i + 4] -= (x << 11) & (LimbPattern::WIDTH29BITS as u32);
                 } else {
-                    tmp[i + 4] -= (x << 11) & LimbPattern::WIDTH29BITS;
+                    tmp[i + 4] -= (x << 11) & (LimbPattern::WIDTH29BITS as u32);
                 }
                 if tmp[i + 5] < 0x10000000 {
                     tmp[i + 5] += 0x10000000 & x_mask;
@@ -671,10 +677,10 @@ impl PayloadHelper {
                     set9 = 1;
                     tmp[i + 8] += 0x20000000 & x_mask;
                     tmp[i + 8] -= set8;
-                    tmp[i + 8] -= (x << 25) & LimbPattern::WIDTH29BITS;
+                    tmp[i + 8] -= (x << 25) & (LimbPattern::WIDTH29BITS as u32);
                 } else {
                     tmp[i + 8] -= set8;
-                    tmp[i + 8] -= (x << 25) & LimbPattern::WIDTH29BITS;
+                    tmp[i + 8] -= (x << 25) & (LimbPattern::WIDTH29BITS as u32);
                 }
                 if tmp[i + 9] < 0x10000000 {
                     tmp[i + 9] += 0x10000000 & x_mask;
@@ -697,15 +703,15 @@ impl PayloadHelper {
         while i < 8 {
             a.data[i] = tmp[i + 9];
             a.data[i] += carry;
-            a.data[i] += (tmp[i + 10] << 28) & LimbPattern::WIDTH29BITS;
+            a.data[i] += (tmp[i + 10] << 28) & (LimbPattern::WIDTH29BITS as u32);
             carry = a.data[i] >> 29;
-            a.data[i] &= LimbPattern::WIDTH29BITS;
+            a.data[i] &= LimbPattern::WIDTH29BITS as u32;
 
             i += 1;
             a.data[i] = tmp[i + 9] >> 1;
             a.data[i] += carry;
             carry = a.data[i] >> 28;
-            a.data[i] &= LimbPattern::WIDTH28BITS;
+            a.data[i] &= LimbPattern::WIDTH28BITS as u32;
 
             i += 1;
         }
@@ -713,7 +719,7 @@ impl PayloadHelper {
         a.data[8] = tmp[17];
         a.data[8] += carry;
         carry = a.data[8] >> 29;
-        a.data[8] &= LimbPattern::WIDTH29BITS;
+        a.data[8] &= LimbPattern::WIDTH29BITS as u32;
 
         Self::reduce_carry(a, carry as usize)
     }
@@ -876,7 +882,7 @@ impl Payload {
             (self.data[7] as u64) * ((other.data[7] as u64) << 1) +
             (self.data[8] as u64) * ((other.data[6] as u64) << 0);
         tmp[15] = (self.data[7] as u64) * ((other.data[8] as u64) << 0) +
-            (self.data[8] as u64) * ((b[7] as u64) << 0);
+            (self.data[8] as u64) * ((other.data[7] as u64) << 0);
         tmp[16] = (self.data[8] as u64) * ((other.data[8] as u64) << 0);
 
         PayloadHelper::reduce_degree(&mut result, &mut tmp);
