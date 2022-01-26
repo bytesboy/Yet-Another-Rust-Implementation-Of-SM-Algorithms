@@ -468,8 +468,78 @@ impl PayloadHelper {
         n = n.mod_floor(&elliptic.ec.p.to_bigint().unwrap());
         n
     }
+
+
+    /// reduce_carry adds a multiple of p in order to cancel |carry|,which is a term at 2^257.
+    ///
+    /// payload = \[r0, r1, r2, r3, r4, r5, r6, r7, r8]
+    ///
+    /// we can count Res = carry * 2^257 + r8 * 2^228 + r7 * 2^200 + r6 * 2^171 + r5 * 2^143 + r4 * 2^114 + r3 * 2^86 + r2 * 2^57 + r1 * 2^29 + r0,
+    /// and carry * 2^257 could transform to array P256CARRY, through with PayloadHelper::transform(carry), where carry is from 0 to 7.
+    ///
+    /// So we can mark ResArray = payload + P256CARRY, and Res = PayloadHelper::restore(ResArray)
+    ///
+    /// |capacity| 32bits |    32bits   | 32bits | 32bits | 32bits |     32bits   |    32bits   | 32bits |    32bits   |
+    /// | length | 29bits |   <=29bits  | 29bits | 28bits | 29bits |   <=29bits   |   <=30bits  | 28bits |   <=30bits  |
+    /// | ------ | ------ | ----------- | ------ | ------ | ------ | -----------  | ----------- | ------ | ----------- |
+    /// |        |   r8   | r7+T[c*9+7] |   r6   |   r5   |   r4   |  r3+T[c*9+3] | r2+T[c*9+2] |   r1   | r0+T[c*9+2] |
+    ///
+    /// On entry: carry < 2^3, payload\[0,2,...] < 2^29, payload\[1,3,...] < 2^28.
+    /// On exit: payload\[0,2,..] < 2^30, payload\[1,3,...] < 2^29.
+    fn reduce_carry(payload: &mut payload, carry: usize) {
+        payload.data[0] += P256CARRY[carry * 9 + 0];
+        payload.data[2] += P256CARRY[carry * 9 + 2];
+        payload.data[3] += P256CARRY[carry * 9 + 3];
+        payload.data[7] += P256CARRY[carry * 9 + 7];
+    }
 }
 
+
+impl payload {
+    fn init() -> Self {
+        payload { data: [0u32; 9] }
+    }
+
+    /// payload3 = payload1 + payload2
+    ///
+    /// payload1 = \[x0, x1, x2, x3, x4, x5, x6, x7, x8]
+    /// payload2 = \[y0, y1, y2, y3, y4, y5, y6, y7, y8]
+    ///
+    /// |capacity| 32bits | 32bits | 32bits | 32bits | 32bits | 32bits | 32bits | 32bits | 32bits |
+    /// |        |   x8   |   x7   |   x6   |   x5   |   x4   |   x3   |   x2   |   x1   |   x0   |
+    /// |        |   y8   |   y7   |   y6   |   y5   |   y4   |   y3   |   y2   |   y1   |   y0   |
+    ///
+    /// |capacity| 32bits | 32bits | 32bits | 32bits | 32bits | 32bits | 32bits | 32bits | 32bits |
+    /// | length | 29bits | 28bits | 29bits | 28bits | 29bits | 28bits | 29bits | 28bits | 29bits |
+    /// |   257  |   228  |   200  |   171  |   143  |   114  |   86   |   57   |   29   |    0   |
+    /// | ------ | ------ | ------ | ------ | ------ | ------ | ------ | ------ | ------ | ------ |
+    /// | carry  |   r8   |   r7   |   r6   |   r5   |   r4   |   r3   |   r2   |   r1   |   r0   |
+    ///
+    /// On entry, payload1\[i] + payload2\[i] must not overflow a 32-bit word.
+    /// On exit: payload3\[0,2,...] < 2^30, payload3\[1,3,...] < 2^29
+    fn add(&self, other: payload) -> payload {
+        let mut result = payload::init();
+        let mut carry: u32 = 0;
+        let mut i = 0;
+        loop {
+            let x = self.data[i].wrapping_add(other.data[i]).wrapping_add(carry);
+            carry = x.shr(29);
+            result.data[i] = x & (LimbPattern::WIDTH29BITS as u32);
+            i += 1;
+            if i == 9 {
+                break;
+            }
+            let x = self.data[i].wrapping_add(other.data[i]).wrapping_add(carry);
+            carry = x.shr(28);
+            result.data[i] = x & (LimbPattern::WIDTH28BITS as u32);
+            i += 1;
+        }
+        payloadHelper::reduce_carry(&mut result, carry as usize);
+        result
+    }
+
+    // fn sub(&self, other: payload) -> payload {}
+}
 
 #[cfg(test)]
 mod tests {
@@ -519,5 +589,23 @@ mod tests {
             println!();
         }
         assert_eq!(table, P256CARRY)
+    }
+
+    #[test]
+    fn factor_table() {
+        let mut table: [[u32; 9]; 9] = [[0; 9]; 9];
+        for i in 0..9 {
+            let value = BigInt::from(i as i64);
+            let payload = payloadHelper::transform(&value);
+
+            let mut temp: [u32; 9] = [0; 9];
+            for (j, e) in payload.data.iter().enumerate() {
+                temp[j] = *e;
+                print!("0x{:>08X}, ", *e);
+            }
+            table[i] = temp;
+            println!();
+        }
+        assert_eq!(table, P256FACTOR)
     }
 }
