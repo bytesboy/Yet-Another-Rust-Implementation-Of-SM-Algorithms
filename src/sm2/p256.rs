@@ -486,7 +486,7 @@ impl PayloadHelper {
     ///
     /// On entry: carry < 2^3, payload\[0,2,...] < 2^29, payload\[1,3,...] < 2^28.
     /// On exit: payload\[0,2,..] < 2^30, payload\[1,3,...] < 2^29.
-    fn reduce_carry(payload: &mut payload, carry: usize) {
+    fn reduce_carry(payload: &mut Payload, carry: usize) {
         payload.data[0] += P256CARRY[carry * 9 + 0];
         payload.data[2] += P256CARRY[carry * 9 + 2];
         payload.data[3] += P256CARRY[carry * 9 + 3];
@@ -495,9 +495,9 @@ impl PayloadHelper {
 }
 
 
-impl payload {
+impl Payload {
     fn init() -> Self {
-        payload { data: [0u32; 9] }
+        Payload { data: [0u32; 9] }
     }
 
     /// payload3 = payload1 + payload2
@@ -517,8 +517,8 @@ impl payload {
     ///
     /// On entry, payload1\[i] + payload2\[i] must not overflow a 32-bit word.
     /// On exit: payload3\[0,2,...] < 2^30, payload3\[1,3,...] < 2^29
-    fn add(&self, other: payload) -> payload {
-        let mut result = payload::init();
+    fn add(&self, other: Payload) -> Payload {
+        let mut result = Payload::init();
         let mut carry: u32 = 0;
         let mut i = 0;
         loop {
@@ -534,11 +534,13 @@ impl payload {
             result.data[i] = x & (LimbPattern::WIDTH28BITS as u32);
             i += 1;
         }
-        payloadHelper::reduce_carry(&mut result, carry as usize);
+        PayloadHelper::reduce_carry(&mut result, carry as usize);
         result
     }
 
-    // fn sub(&self, other: payload) -> payload {}
+    fn sub(&self, other: Payload) -> Payload {
+        todo!()
+    }
 }
 
 #[cfg(test)]
@@ -596,7 +598,7 @@ mod tests {
         let mut table: [[u32; 9]; 9] = [[0; 9]; 9];
         for i in 0..9 {
             let value = BigInt::from(i as i64);
-            let payload = payloadHelper::transform(&value);
+            let payload = PayloadHelper::transform(&value);
 
             let mut temp: [u32; 9] = [0; 9];
             for (j, e) in payload.data.iter().enumerate() {
