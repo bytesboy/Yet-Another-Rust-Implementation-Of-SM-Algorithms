@@ -492,6 +492,234 @@ impl PayloadHelper {
         payload.data[3] += P256CARRY[carry * 9 + 3];
         payload.data[7] += P256CARRY[carry * 9 + 7];
     }
+
+    /// reduce_degree sets a = b/R mod p where b contains 64-bit words with the same
+    /// 29,28,... bit positions as a field element.
+    ///
+    /// The values in field elements are in Montgomery form: x*R mod p where R = 2^257.
+    /// Since we just multiplied two Montgomery values together, the result is x * y * R * R mod p.
+    /// We wish to divide by R in order for the result also to be in Montgomery form.
+    ///
+    /// On entry: tmp\[i] < 2^64
+    /// On exit:  a\[0,2,...] < 2^30, a\[1,3,...] < 2^29
+    ///
+    /// Limb number:   0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10...
+    /// Width (bits):  29| 28| 29| 28| 29| 28| 29| 28| 29| 28| 29
+    /// Start bit:     0 | 29| 57| 86|114|143|171|200|228|257|285
+    /// (odd phase):   0 | 28| 57| 85|114|142|171|199|228|256|285
+    fn reduce_degree(a: &mut Payload, b: &mut [u64; 17]) {
+        let mut tmp: [u32; 18] = [0; 18];
+        let mut carry: u32;
+        let mut x: u32;
+        let mut x_mask: u32;
+
+        tmp[0] = (b[0] as u32) & LimbPattern::WIDTH29BITS;
+        tmp[1] = (b[0] as u32) >> 29;
+        tmp[1] |= (((b[0] >> 32) as u32) << 3) & LimbPattern::WIDTH28BITS;
+        tmp[1] += (b[1] as u32) & LimbPattern::WIDTH28BITS;
+        carry = tmp[1] >> 28;
+        tmp[1] &= LimbPattern::WIDTH28BITS;
+
+        let mut i = 2;
+        while i < 17 {
+            tmp[i] = ((b[i - 2] >> 32) as u32) >> 25;
+            tmp[i] += ((b[i - 1]) as u32) >> 28;
+            tmp[i] += (((b[i - 1] >> 32) as u32) << 4) & LimbPattern::WIDTH29BITS;
+            tmp[i] += (b[i] as u32) & LimbPattern::WIDTH29BITS;
+            tmp[i] += carry;
+            carry = tmp[i] >> 29;
+            tmp[i] &= LimbPattern::WIDTH29BITS;
+
+            i += 1;
+            if i == 17 {
+                break;
+            }
+
+            tmp[i] = ((b[i - 2] >> 32) as u32) >> 25;
+            tmp[i] += (b[i - 1] as u32) >> 29;
+            tmp[i] += (((b[i - 1] >> 32) as u32) << 3) & LimbPattern::WIDTH28BITS;
+            tmp[i] += (b[i] as u32) & LimbPattern::WIDTH28BITS;
+            tmp[i] += carry;
+            carry = tmp[i] >> 28;
+            tmp[i] &= LimbPattern::WIDTH28BITS;
+
+            i += 1
+        }
+
+        tmp[17] = ((b[15] >> 32) as u32) >> 25;
+        tmp[17] += (b[16] as u32) >> 29;
+        tmp[17] += ((b[16] >> 32) as u32) << 3;
+        tmp[17] += carry;
+
+        i = 0;
+        loop {
+            tmp[i + 1] += tmp[i] >> 29;
+            x = tmp[i] & LimbPattern::WIDTH29BITS;
+            tmp[i] = 0;
+
+            if x > 0 {
+                let mut set4: u32 = 0;
+                let mut set7: u32 = 0;
+                x_mask = Self::mask(x);
+                tmp[i + 2] += (x << 7) & LimbPattern::WIDTH29BITS;
+                tmp[i + 3] += x >> 22;
+                // At position 86, which is the starting bit position for word 3, we
+                // have a factor of 0xffffc00 = 2**28 - 2**10
+                if tmp[i + 3] < 0x10000000 {
+                    set4 = 1;
+                    tmp[i + 3] += 0x10000000 & x_mask;
+                    tmp[i + 3] -= (x << 10) & LimbPattern::WIDTH28BITS;
+                } else {
+                    tmp[i + 3] -= (x << 10) & LimbPattern::WIDTH28BITS;
+                }
+                if tmp[i + 4] < 0x20000000 {
+                    tmp[i + 4] += 0x20000000 & x_mask;
+                    tmp[i + 4] -= set4;
+                    tmp[i + 4] -= x >> 18;
+                    if tmp[i + 5] < 0x10000000 {
+                        tmp[i + 5] += 0x10000000 & x_mask;
+                        tmp[i + 5] -= 1;
+                        if tmp[i + 6] < 0x20000000 {
+                            set7 = 1;
+                            tmp[i + 6] += 0x20000000 & x_mask;
+                            tmp[i + 6] -= 1;
+                        } else {
+                            tmp[i + 6] -= 1;
+                        }
+                    } else {
+                        tmp[i + 5] -= 1;
+                    }
+                } else {
+                    tmp[i + 4] -= set4;
+                    tmp[i + 4] -= x >> 18;
+                }
+                // At position 200, which is the starting bit position for word 7, we
+                // have a factor of 0xeffffff = 2**28 - 2**24 - 1
+                if tmp[i + 7] < 0x10000000 {
+                    tmp[i + 7] += 0x10000000 & x_mask;
+                    tmp[i + 7] -= set7;
+                    tmp[i + 7] -= (x << 24) & LimbPattern::WIDTH28BITS;
+                    tmp[i + 8] += (x << 28) & LimbPattern::WIDTH29BITS;
+                    if tmp[i + 8] < 0x20000000 {
+                        tmp[i + 8] += 0x20000000 & x_mask;
+                        tmp[i + 8] -= 1;
+                        tmp[i + 8] -= x >> 4;
+                        tmp[i + 9] += ((x >> 1) - 1) & x_mask;
+                    } else {
+                        tmp[i + 8] -= 1;
+                        tmp[i + 8] -= x >> 4;
+                        tmp[i + 9] += (x >> 1) & x_mask;
+                    }
+                } else {
+                    tmp[i + 7] -= set7;
+                    tmp[i + 7] -= (x << 24) & LimbPattern::WIDTH28BITS;
+                    tmp[i + 8] += (x << 28) & LimbPattern::WIDTH29BITS;
+                    if tmp[i + 8] < 0x20000000 {
+                        tmp[i + 8] += 0x20000000 & x_mask;
+                        tmp[i + 8] -= x >> 4;
+                        tmp[i + 9] += ((x >> 1) - 1) & x_mask;
+                    } else {
+                        tmp[i + 8] -= x >> 4;
+                        tmp[i + 9] += (x >> 1) & x_mask;
+                    }
+                }
+            }
+
+            if (i + 1) == 9 {
+                break;
+            }
+            tmp[i + 2] += tmp[i + 1] >> 28;
+            x = tmp[i + 1] & LimbPattern::WIDTH28BITS;
+            tmp[i + 1] = 0;
+
+            if x > 0 {
+                let mut set5 = 0;
+                let mut set8 = 0;
+                let mut set9 = 0;
+                x_mask = Self::mask(x);
+                tmp[i + 3] += (x << 7) & LimbPattern::WIDTH28BITS;
+                tmp[i + 4] += x >> 21;
+                // At position 85, which is the starting bit position for word 3, we
+                // have a factor of 0x1ffff800 = 2**29 - 2**11
+                if tmp[i + 4] < 0x20000000 {
+                    set5 = 1;
+                    tmp[i + 4] += 0x20000000 & x_mask;
+                    tmp[i + 4] -= (x << 11) & LimbPattern::WIDTH29BITS;
+                } else {
+                    tmp[i + 4] -= (x << 11) & LimbPattern::WIDTH29BITS;
+                }
+                if tmp[i + 5] < 0x10000000 {
+                    tmp[i + 5] += 0x10000000 & x_mask;
+                    tmp[i + 5] -= set5;
+                    tmp[i + 5] -= x >> 18;
+                    if tmp[i + 6] < 0x20000000 {
+                        tmp[i + 6] += 0x20000000 & x_mask;
+                        tmp[i + 6] -= 1;
+                        if tmp[i + 7] < 0x10000000 {
+                            set8 = 1;
+                            tmp[i + 7] += 0x10000000 & x_mask;
+                            tmp[i + 7] -= 1;
+                        } else {
+                            tmp[i + 7] -= 1;
+                        }
+                    } else {
+                        tmp[i + 6] -= 1;
+                    }
+                } else {
+                    tmp[i + 5] -= set5;
+                    tmp[i + 5] -= x >> 18;
+                }
+
+                if tmp[i + 8] < 0x20000000 {
+                    set9 = 1;
+                    tmp[i + 8] += 0x20000000 & x_mask;
+                    tmp[i + 8] -= set8;
+                    tmp[i + 8] -= (x << 25) & LimbPattern::WIDTH29BITS;
+                } else {
+                    tmp[i + 8] -= set8;
+                    tmp[i + 8] -= (x << 25) & LimbPattern::WIDTH29BITS;
+                }
+                if tmp[i + 9] < 0x10000000 {
+                    tmp[i + 9] += 0x10000000 & x_mask;
+                    tmp[i + 9] -= set9;
+                    tmp[i + 9] -= x >> 4;
+                    tmp[i + 10] += (x - 1) & x_mask;
+                } else {
+                    tmp[i + 9] -= set9;
+                    tmp[i + 9] -= x >> 4;
+                    tmp[i + 10] += x & x_mask;
+                }
+            }
+
+            i += 2;
+        }
+
+
+        carry = 0;
+        i = 0;
+        while i < 8 {
+            a.data[i] = tmp[i + 9];
+            a.data[i] += carry;
+            a.data[i] += (tmp[i + 10] << 28) & LimbPattern::WIDTH29BITS;
+            carry = a.data[i] >> 29;
+            a.data[i] &= LimbPattern::WIDTH29BITS;
+
+            i += 1;
+            a.data[i] = tmp[i + 9] >> 1;
+            a.data[i] += carry;
+            carry = a.data[i] >> 28;
+            a.data[i] &= LimbPattern::WIDTH28BITS;
+
+            i += 1;
+        }
+
+        a.data[8] = tmp[17];
+        a.data[8] += carry;
+        carry = a.data[8] >> 29;
+        a.data[8] &= LimbPattern::WIDTH29BITS;
+
+        Self::reduce_carry(a, carry as usize)
+    }
 }
 
 
@@ -538,6 +766,11 @@ impl Payload {
         result
     }
 
+    /// payload3 = payload1 - payload2
+    ///
+    /// On entry: payload1\[0,2,...] < 2^30, payload1\[1,3,...] < 2^29 and
+    ///           payload2\[0,2,...] < 2^30, payload2\[1,3,...] < 2^29.
+    /// On exit:  payload3\[0,2,...] < 2^30, payload3\[1,3,...] < 2^29.
     fn subtract(&self, other: Payload) -> Payload {
         let mut result = Payload::init();
         let mut carry: u32 = 0;
@@ -556,6 +789,153 @@ impl Payload {
             i += 1;
         }
         PayloadHelper::reduce_carry(&mut result, carry as usize);
+        result
+    }
+
+    /// multiply sets payload3 = payload1 * payload2.
+    ///
+    /// On entry: payload1\[0,2,...] < 2^30, payload1\[1,3,...] < 2^29 and
+    ///           payload2\[0,2,...] < 2^30, payload2\[1,3,...] < 2^29.
+    /// On exit:  payload3\[0,2,...] < 2^30, payload3\[1,3,...] < 2^29.
+    fn multiply(&self, other: Payload) -> Payload {
+        let mut result = Payload::init();
+        let mut tmp: [u64; 17] = [0; 17];
+        tmp[0] = (self.data[0] as u64) * (other.data[0] as u64);
+        tmp[1] = (self.data[0] as u64) * ((other.data[1] as u64) << 0) +
+            (self.data[1] as u64) * ((other.data[0] as u64) << 0);
+        tmp[2] = (self.data[0] as u64) * ((other.data[2] as u64) << 0) +
+            (self.data[1] as u64) * ((other.data[1] as u64) << 1) +
+            (self.data[2] as u64) * ((other.data[0] as u64) << 0);
+        tmp[3] = (self.data[0] as u64) * ((other.data[3] as u64) << 0) +
+            (self.data[1] as u64) * ((other.data[2] as u64) << 0) +
+            (self.data[2] as u64) * ((other.data[1] as u64) << 0) +
+            (self.data[3] as u64) * ((other.data[0] as u64) << 0);
+        tmp[4] = (self.data[0] as u64) * ((other.data[4] as u64) << 0) +
+            (self.data[1] as u64) * ((other.data[3] as u64) << 1) +
+            (self.data[2] as u64) * ((other.data[2] as u64) << 0) +
+            (self.data[3] as u64) * ((other.data[1] as u64) << 1) +
+            (self.data[4] as u64) * ((other.data[0] as u64) << 0);
+        tmp[5] = (self.data[0] as u64) * ((other.data[5] as u64) << 0) +
+            (self.data[1] as u64) * ((other.data[4] as u64) << 0) +
+            (self.data[2] as u64) * ((other.data[3] as u64) << 0) +
+            (self.data[3] as u64) * ((other.data[2] as u64) << 0) +
+            (self.data[4] as u64) * ((other.data[1] as u64) << 0) +
+            (self.data[5] as u64) * ((other.data[0] as u64) << 0);
+        tmp[6] = (self.data[0] as u64) * ((other.data[6] as u64) << 0) +
+            (self.data[1] as u64) * ((other.data[5] as u64) << 1) +
+            (self.data[2] as u64) * ((other.data[4] as u64) << 0) +
+            (self.data[3] as u64) * ((other.data[3] as u64) << 1) +
+            (self.data[4] as u64) * ((other.data[2] as u64) << 0) +
+            (self.data[5] as u64) * ((other.data[1] as u64) << 1) +
+            (self.data[6] as u64) * ((other.data[0] as u64) << 0);
+        tmp[7] = (self.data[0] as u64) * ((other.data[7] as u64) << 0) +
+            (self.data[1] as u64) * ((other.data[6] as u64) << 0) +
+            (self.data[2] as u64) * ((other.data[5] as u64) << 0) +
+            (self.data[3] as u64) * ((other.data[4] as u64) << 0) +
+            (self.data[4] as u64) * ((other.data[3] as u64) << 0) +
+            (self.data[5] as u64) * ((other.data[2] as u64) << 0) +
+            (self.data[6] as u64) * ((other.data[1] as u64) << 0) +
+            (self.data[7] as u64) * ((other.data[0] as u64) << 0);
+        tmp[8] = (self.data[0] as u64) * ((other.data[8] as u64) << 0) +
+            (self.data[1] as u64) * ((other.data[7] as u64) << 1) +
+            (self.data[2] as u64) * ((other.data[6] as u64) << 0) +
+            (self.data[3] as u64) * ((other.data[5] as u64) << 1) +
+            (self.data[4] as u64) * ((other.data[4] as u64) << 0) +
+            (self.data[5] as u64) * ((other.data[3] as u64) << 1) +
+            (self.data[6] as u64) * ((other.data[2] as u64) << 0) +
+            (self.data[7] as u64) * ((other.data[1] as u64) << 1) +
+            (self.data[8] as u64) * ((other.data[0] as u64) << 0);
+        tmp[9] = (self.data[1] as u64) * ((other.data[8] as u64) << 0) +
+            (self.data[2] as u64) * ((other.data[7] as u64) << 0) +
+            (self.data[3] as u64) * ((other.data[6] as u64) << 0) +
+            (self.data[4] as u64) * ((other.data[5] as u64) << 0) +
+            (self.data[5] as u64) * ((other.data[4] as u64) << 0) +
+            (self.data[6] as u64) * ((other.data[3] as u64) << 0) +
+            (self.data[7] as u64) * ((other.data[2] as u64) << 0) +
+            (self.data[8] as u64) * ((other.data[1] as u64) << 0);
+        tmp[10] = (self.data[2] as u64) * ((other.data[8] as u64) << 0) +
+            (self.data[3] as u64) * ((other.data[7] as u64) << 1) +
+            (self.data[4] as u64) * ((other.data[6] as u64) << 0) +
+            (self.data[5] as u64) * ((other.data[5] as u64) << 1) +
+            (self.data[6] as u64) * ((other.data[4] as u64) << 0) +
+            (self.data[7] as u64) * ((other.data[3] as u64) << 1) +
+            (self.data[8] as u64) * ((other.data[2] as u64) << 0);
+        tmp[11] = (self.data[3] as u64) * ((other.data[8] as u64) << 0) +
+            (self.data[4] as u64) * ((other.data[7] as u64) << 0) +
+            (self.data[5] as u64) * ((other.data[6] as u64) << 0) +
+            (self.data[6] as u64) * ((other.data[5] as u64) << 0) +
+            (self.data[7] as u64) * ((other.data[4] as u64) << 0) +
+            (self.data[8] as u64) * ((other.data[3] as u64) << 0);
+        tmp[12] = (self.data[4] as u64) * ((other.data[8] as u64) << 0) +
+            (self.data[5] as u64) * ((other.data[7] as u64) << 1) +
+            (self.data[6] as u64) * ((other.data[6] as u64) << 0) +
+            (self.data[7] as u64) * ((other.data[5] as u64) << 1) +
+            (self.data[8] as u64) * ((other.data[4] as u64) << 0);
+        tmp[13] = (self.data[5] as u64) * ((other.data[8] as u64) << 0) +
+            (self.data[6] as u64) * ((other.data[7] as u64) << 0) +
+            (self.data[7] as u64) * ((other.data[6] as u64) << 0) +
+            (self.data[8] as u64) * ((other.data[5] as u64) << 0);
+        tmp[14] = (self.data[6] as u64) * ((other.data[8] as u64) << 0) +
+            (self.data[7] as u64) * ((other.data[7] as u64) << 1) +
+            (self.data[8] as u64) * ((other.data[6] as u64) << 0);
+        tmp[15] = (self.data[7] as u64) * ((other.data[8] as u64) << 0) +
+            (self.data[8] as u64) * ((b[7] as u64) << 0);
+        tmp[16] = (self.data[8] as u64) * ((other.data[8] as u64) << 0);
+
+        PayloadHelper::reduce_degree(&mut result, &mut tmp);
+        result
+    }
+
+    fn square(&self) -> Payload {
+        let mut result = Payload::init();
+        let mut tmp: [u64; 17] = [0; 17];
+        tmp[0] = (self.data[0] as u64) * (self.data[0] as u64);
+        tmp[1] = (self.data[0] as u64) * ((self.data[1] as u64) << 1);
+        tmp[2] = (self.data[0] as u64) * ((self.data[2] as u64) << 1) +
+            (self.data[1] as u64) * ((self.data[1] as u64) << 1);
+        tmp[3] = (self.data[0] as u64) * ((self.data[3] as u64) << 1) +
+            (self.data[1] as u64) * ((self.data[2] as u64) << 1);
+        tmp[4] = (self.data[0] as u64) * ((self.data[4] as u64) << 1) +
+            (self.data[1] as u64) * ((self.data[3] as u64) << 2) +
+            (self.data[2] as u64) * (self.data[2] as u64);
+        tmp[5] = (self.data[0] as u64) * ((self.data[5] as u64) << 1) +
+            (self.data[1] as u64) * ((self.data[4] as u64) << 1) +
+            (self.data[2] as u64) * ((self.data[3] as u64) << 1);
+        tmp[6] = (self.data[0] as u64) * ((self.data[6] as u64) << 1) +
+            (self.data[1] as u64) * ((self.data[5] as u64) << 2) +
+            (self.data[2] as u64) * ((self.data[4] as u64) << 1) +
+            (self.data[3] as u64) * ((self.data[3] as u64) << 1);
+        tmp[7] = (self.data[0] as u64) * ((self.data[7] as u64) << 1) +
+            (self.data[1] as u64) * ((self.data[6] as u64) << 1) +
+            (self.data[2] as u64) * ((self.data[5] as u64) << 1) +
+            (self.data[3] as u64) * ((self.data[4] as u64) << 1);
+        tmp[8] = (self.data[0] as u64) * ((self.data[8] as u64) << 1) +
+            (self.data[1] as u64) * ((self.data[7] as u64) << 2) +
+            (self.data[2] as u64) * ((self.data[6] as u64) << 1) +
+            (self.data[3] as u64) * ((self.data[5] as u64) << 2) +
+            (self.data[4] as u64) * (self.data[4] as u64);
+        tmp[9] = (self.data[1] as u64) * ((self.data[8] as u64) << 1) +
+            (self.data[2] as u64) * ((self.data[7] as u64) << 1) +
+            (self.data[3] as u64) * ((self.data[6] as u64) << 1) +
+            (self.data[4] as u64) * ((self.data[5] as u64) << 1);
+        tmp[10] = (self.data[2] as u64) * ((self.data[8] as u64) << 1) +
+            (self.data[3] as u64) * ((self.data[7] as u64) << 2) +
+            (self.data[4] as u64) * ((self.data[6] as u64) << 1) +
+            (self.data[5] as u64) * ((self.data[5] as u64) << 1);
+        tmp[11] = (self.data[3] as u64) * ((self.data[8] as u64) << 1) +
+            (self.data[4] as u64) * ((self.data[7] as u64) << 1) +
+            (self.data[5] as u64) * ((self.data[6] as u64) << 1);
+        tmp[12] = (self.data[4] as u64) * ((self.data[8] as u64) << 1) +
+            (self.data[5] as u64) * ((self.data[7] as u64) << 2) +
+            (self.data[6] as u64) * (self.data[6] as u64);
+        tmp[13] = (self.data[5] as u64) * ((self.data[8] as u64) << 1) +
+            (self.data[6] as u64) * ((self.data[7] as u64) << 1);
+        tmp[14] = (self.data[6] as u64) * ((self.data[8] as u64) << 1) +
+            (self.data[7] as u64) * ((self.data[7] as u64) << 1);
+        tmp[15] = (self.data[7] as u64) * ((self.data[8] as u64) << 1);
+        tmp[16] = (self.data[8] as u64) * (self.data[8] as u64);
+
+        PayloadHelper::reduce_degree(&mut result, &mut tmp);
         result
     }
 }
