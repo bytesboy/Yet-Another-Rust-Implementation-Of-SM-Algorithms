@@ -5,7 +5,7 @@ use num_integer::Integer;
 use num_traits::FromPrimitive;
 
 use crate::sm2::p256::core::P256Elliptic;
-use crate::sm2::p256::params::{P256CARRY, P256ZERO31};
+use crate::sm2::p256::params::{P256CARRY, P256FACTOR, P256ZERO31};
 
 /// Field elements are represented as nine, unsigned 32-bit words. The value of a field element is:
 ///
@@ -43,6 +43,7 @@ enum LimbPattern {
     WIDTH29BITS = 0x1FFFFFFF,
 }
 
+#[derive(Debug)]
 pub(crate) struct Payload {
     data: [u32; 9],
 }
@@ -50,6 +51,10 @@ pub(crate) struct Payload {
 impl Payload {
     pub(crate) fn init() -> Self {
         Payload { data: [0u32; 9] }
+    }
+
+    pub(crate) fn new(data: [u32; 9]) -> Self {
+        Payload { data }
     }
 
     pub(crate) fn data(&self) -> [u32; 9] {
@@ -73,7 +78,7 @@ impl Payload {
     ///
     /// On entry, payload1\[i] + payload2\[i] must not overflow a 32-bit word.
     /// On exit: payload3\[0,2,...] < 2^30, payload3\[1,3,...] < 2^29
-    pub(crate) fn add(&mut self, other: Payload) -> Payload {
+    pub(crate) fn add(&self, other: &Payload) -> Payload {
         let mut result = Payload::init();
         let mut carry: u32 = 0;
         let mut i = 0;
@@ -99,7 +104,7 @@ impl Payload {
     /// On entry: payload1\[0,2,...] < 2^30, payload1\[1,3,...] < 2^29 and
     ///           payload2\[0,2,...] < 2^30, payload2\[1,3,...] < 2^29.
     /// On exit:  payload3\[0,2,...] < 2^30, payload3\[1,3,...] < 2^29.
-    pub(crate) fn subtract(&self, other: Payload) -> Payload {
+    pub(crate) fn subtract(&self, other: &Payload) -> Payload {
         let mut result = Payload::init();
         let mut carry: u32 = 0;
         let mut i = 0;
@@ -125,7 +130,7 @@ impl Payload {
     /// On entry: payload1\[0,2,...] < 2^30, payload1\[1,3,...] < 2^29 and
     ///           payload2\[0,2,...] < 2^30, payload2\[1,3,...] < 2^29.
     /// On exit:  payload3\[0,2,...] < 2^30, payload3\[1,3,...] < 2^29.
-    pub(crate) fn multiply(&self, other: Payload) -> Payload {
+    pub(crate) fn multiply(&self, other: &Payload) -> Payload {
         let mut result = Payload::init();
         let mut tmp: [u64; 17] = [0; 17];
         tmp[0] = (self.data[0] as u64) * (other.data[0] as u64);
@@ -265,6 +270,11 @@ impl Payload {
 
         PayloadHelper::reduce_degree(&mut result, &mut tmp);
         result
+    }
+
+    pub(crate) fn scalar_multiply(&self, n: usize) -> Payload {
+        let p = Payload { data: P256FACTOR[n] };
+        self.multiply(&p)
     }
 }
 
