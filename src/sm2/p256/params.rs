@@ -78,7 +78,7 @@ pub const RI: [u8; 32] = [
     0x80, 0x00, 0x00, 0x02
 ];
 
-/// MULTI_BASE_POINT_PRECOMPUTED contains precomputed values to aid the calculation of scalar
+/// BASE_TABLE contains precomputed values to aid the calculation of scalar
 /// multiples of the base point, G. It's actually two, equal length, tables concatenated.
 ///
 /// The first table contains (x,y) field element pairs for 16 multiples of the base point, G.
@@ -123,7 +123,7 @@ pub const RI: [u8; 32] = [
 /// precompute(1) => \[u32; 15 * 9 * 2]
 /// precompute(2**32) => \[u32; 15 * 9 * 2]
 /// MULTI_BASE_POINT_PRECOMPUTED = \[precompute(1), precompute(2**32)]
-pub const MULTI_BASE_POINT_PRECOMPUTED: [u32; 15 * 2 * 9 * 2] = [
+pub const BASE_TABLE: [u32; 15 * 2 * 9 * 2] = [
     0x0830053D, 0x0328990F, 0x06C04FE1, 0x0C0F72E5, 0x01E19F3C, 0x0666B093, 0x0175A87B, 0x0EC38276, 0x0222CF4B,
     0x185A1BBA, 0x0354E593, 0x1295FAC1, 0x0F2BC469, 0x047C60FA, 0x0C19B8A9, 0x0F63533E, 0x0903AE6B, 0x0C79ACBA,
     0x15B061A4, 0x033E020B, 0x0DFFB34B, 0x00FCF2C8, 0x16582E08, 0x0262F203, 0x0FB34381, 0x00A55452, 0x0604F0FF,

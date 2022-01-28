@@ -4,7 +4,7 @@ use num_bigint::{BigInt, ToBigInt};
 use num_integer::Integer;
 use num_traits::FromPrimitive;
 
-use crate::sm2::p256::core::P256Elliptic;
+use crate::sm2::p256::core::{P256Elliptic, mask};
 use crate::sm2::p256::params::{P256CARRY, P256FACTOR, P256ZERO31};
 
 /// Field elements are represented as nine, unsigned 32-bit words. The value of a field element is:
@@ -43,7 +43,7 @@ enum LimbPattern {
     WIDTH29BITS = 0x1FFFFFFF,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct Payload {
     data: [u32; 9],
 }
@@ -385,11 +385,6 @@ impl PayloadHelper {
         n
     }
 
-    /// 0xffffffff for 0 < x <= 2^31  0xffffffff = 4294967295 = u32::MAX = 2^31 - 1
-    /// 0 for x == 0 or x > 2^31.
-    fn mask(x: u32) -> u32 {
-        x.wrapping_sub(1).wrapping_shr(31).wrapping_sub(1)
-    }
 
     /// reduce_carry adds a multiple of p in order to cancel |carry|,which is a term at 2^257.
     ///
@@ -481,7 +476,7 @@ impl PayloadHelper {
             if x > 0 {
                 let mut set4: u32 = 0;
                 let mut set7: u32 = 0;
-                x_mask = Self::mask(x);
+                x_mask = mask(x);
                 tmp[i + 2] += (x << 7) & (LimbPattern::WIDTH29BITS as u32);
                 tmp[i + 3] += x >> 22;
 
@@ -555,7 +550,7 @@ impl PayloadHelper {
                 let mut set5 = 0;
                 let mut set8 = 0;
                 let mut set9 = 0;
-                x_mask = Self::mask(x);
+                x_mask = mask(x);
                 tmp[i + 3] += (x << 7) & (LimbPattern::WIDTH28BITS as u32);
                 tmp[i + 4] += x >> 21;
 
