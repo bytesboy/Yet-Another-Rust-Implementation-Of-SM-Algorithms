@@ -114,12 +114,7 @@ impl P256AffinePoint {
     /// get the entry of table by index.
     /// On entry: index < 16, table[0] must be zero.
     fn select(index: u32, table: Vec<u32>) -> Self {
-        let mut table = table.clone();
-
-        let mut point = P256AffinePoint(
-            Payload::init(), Payload::init(),
-        );
-
+        let (mut x, mut y) = (Payload::init().data(), Payload::init().data());
         for i in 1..16 {
             let mut mask: u32 = i ^ index;
             mask |= mask >> 2;
@@ -132,21 +127,14 @@ impl P256AffinePoint {
                 mask -= 1;
             }
 
+            let row_x = ((i - 1) * 18) as usize;
+            let row_y = ((i - 1) * 18 + 9) as usize;
             for j in 0..9 {
-                point.0.data()[j] |= table[0] & mask;
-                if table.len() > 0 {
-                    table = table[1..].to_vec();
-                }
-            }
-
-            for j in 0..9 {
-                point.1.data()[j] |= table[0] & mask;
-                if table.len() > 0 {
-                    table = table[1..].to_vec();
-                }
+                x[j] |= table[row_x + j] & mask;
+                y[j] |= table[row_y + j] & mask;
             }
         }
-        point
+        P256AffinePoint(Payload::new(x), Payload::new(y))
     }
 }
 
@@ -216,16 +204,19 @@ impl P256JacobianPoint {
     /// sets out=source if mask = 0xffffffff in constant time.
     /// On entry: mask is either 0 or 0xffffffff.
     fn copy_from(&self, source: P256JacobianPoint, mask: u32) -> Self {
-        let mut point = P256JacobianPoint(
-            Payload::init(), Payload::init(), Payload::init(),
+        let (mut x, mut y, mut z) = (
+            Payload::init().data(), Payload::init().data(), Payload::init().data()
         );
-
         for i in 0..9 {
-            point.0.data()[i] = self.0.data()[i] ^ (mask & (source.0.data()[i] ^ self.0.data()[i]));
-            point.1.data()[i] = self.1.data()[i] ^ (mask & (source.1.data()[i] ^ self.1.data()[i]));
-            point.2.data()[i] = self.2.data()[i] ^ (mask & (source.2.data()[i] ^ self.2.data()[i]));
+            x[i] = self.0.data()[i] ^ (mask & (source.0.data()[i] ^ self.0.data()[i]));
+            y[i] = self.1.data()[i] ^ (mask & (source.1.data()[i] ^ self.1.data()[i]));
+            z[i] = self.2.data()[i] ^ (mask & (source.2.data()[i] ^ self.2.data()[i]));
         }
-        point
+        P256JacobianPoint(
+            Payload::new(x),
+            Payload::new(y),
+            Payload::new(z),
+        )
     }
 
     /// Jacobian coordinates: (x, y, z)  y^2 = x^3 + axz^4 + bz^6
