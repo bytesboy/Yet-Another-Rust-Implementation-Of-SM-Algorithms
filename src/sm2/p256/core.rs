@@ -127,11 +127,10 @@ impl P256AffinePoint {
                 mask -= 1;
             }
 
-            let row_x = ((i - 1) * 18) as usize;
-            let row_y = ((i - 1) * 18 + 9) as usize;
+            let offset = ((i - 1) * 18) as usize;
             for j in 0..9 {
-                x[j] |= table[row_x + j] & mask;
-                y[j] |= table[row_y + j] & mask;
+                x[j] |= table[offset + j] & mask;
+                y[j] |= table[offset + 9 + j] & mask;
             }
         }
         P256AffinePoint(Payload::new(x), Payload::new(y))
