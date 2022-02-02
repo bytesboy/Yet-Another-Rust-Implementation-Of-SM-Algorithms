@@ -2,7 +2,7 @@ use std::ops::{Add, Sub};
 use num_bigint::BigUint;
 use num_integer::Integer;
 use num_traits::FromPrimitive;
-use crate::sm2::core::EllipticProvider;
+use crate::sm2::ecc::EllipticProvider;
 
 /// 公钥
 /// 非压缩公钥格式字节串长度为65字节，压缩格式长度为33字节，
@@ -73,7 +73,7 @@ impl KeyGenerator {
 #[cfg(test)]
 mod tests {
     use num_traits::Num;
-    use crate::sm2::p256::core::P256Elliptic;
+    use crate::sm2::p256::P256Elliptic;
     use super::*;
 
     #[test]

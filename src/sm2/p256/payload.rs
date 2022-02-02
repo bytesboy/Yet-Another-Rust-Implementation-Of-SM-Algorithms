@@ -3,8 +3,8 @@ use std::ops::{Add, Mul, Shl, Shr};
 use num_bigint::{BigInt, ToBigInt};
 use num_integer::Integer;
 use num_traits::FromPrimitive;
+use crate::sm2::p256::{mask, P256Elliptic};
 
-use crate::sm2::p256::core::{P256Elliptic, mask};
 use crate::sm2::p256::params::{P256CARRY, P256FACTOR, P256ZERO31};
 
 /// Field elements are represented as nine, unsigned 32-bit words. The value of a field element is:

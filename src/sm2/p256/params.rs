@@ -221,7 +221,7 @@ mod tests {
     use num_integer::Integer;
     use num_traits::FromPrimitive;
 
-    use crate::sm2::p256::core::P256Elliptic;
+    use crate::sm2::p256::P256Elliptic;
     use crate::sm2::p256::payload::PayloadHelper;
 
     use super::*;

@@ -1,3 +1,3 @@
 mod key;
-mod core;
+mod ecc;
 mod p256;

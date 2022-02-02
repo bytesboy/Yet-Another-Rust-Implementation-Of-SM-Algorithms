@@ -1,111 +1,27 @@
-use std::cmp::Ordering;
-use std::mem;
-use std::sync::Once;
-
 use num_bigint::{BigUint, ToBigInt};
 use num_integer::Integer;
 
-use crate::sm2::core::{Elliptic, EllipticProvider};
-use crate::sm2::p256::params::{BASE_TABLE, EC_A, EC_B, EC_GX, EC_GY, EC_N, EC_P, P256FACTOR, RI};
+use crate::sm2::p256::{mask, P256Elliptic};
+use crate::sm2::p256::params::{BASE_TABLE, P256FACTOR};
 use crate::sm2::p256::payload::{Payload, PayloadHelper};
 
-#[derive(Clone, Debug)]
-pub struct P256Elliptic {
-    pub ec: Elliptic,
-    pub ri: BigUint,
+pub(crate) trait Multiplication {
+    fn multiply(&self, scalar: [u8; 32]) -> P256AffinePoint;
 }
-
-impl P256Elliptic {
-    pub fn init() -> Self {
-        static mut ELLIPTIC: *const P256Elliptic = std::ptr::null::<P256Elliptic>();
-        static INITIALIZER: Once = Once::new();
-        unsafe {
-            INITIALIZER.call_once(|| {
-                let p256 = P256Elliptic {
-                    ec: Elliptic {
-                        p: BigUint::from_bytes_be(&EC_P),
-                        a: BigUint::from_bytes_be(&EC_A),
-                        b: BigUint::from_bytes_be(&EC_B),
-                        gx: BigUint::from_bytes_be(&EC_GX),
-                        gy: BigUint::from_bytes_be(&EC_GY),
-                        n: BigUint::from_bytes_be(&EC_N),
-                        bits: 256,
-                    },
-                    ri: BigUint::from_bytes_be(&RI),
-                };
-                ELLIPTIC = mem::transmute(Box::new(p256));
-            });
-            (*ELLIPTIC).clone()
-        }
-    }
-}
-
-impl EllipticProvider for P256Elliptic {
-    fn blueprint(&self) -> &Elliptic {
-        &self.ec
-    }
-
-    fn scalar_multiply(&self, x: BigUint, y: BigUint, k: BigUint) -> (BigUint, BigUint) {
-        let point = P256AffinePoint(
-            PayloadHelper::transform(&x.to_bigint().unwrap()),
-            PayloadHelper::transform(&y.to_bigint().unwrap()),
-        );
-        point.multiply(k).restore()
-    }
-
-    fn scalar_base_multiply(&self, k: BigUint) -> (BigUint, BigUint) {
-        let elliptic = self.ec.clone();
-        let base = P256BasePoint {
-            point: P256AffinePoint(
-                PayloadHelper::transform(&elliptic.gx.to_bigint().unwrap()),
-                PayloadHelper::transform(&elliptic.gy.to_bigint().unwrap()),
-            ),
-            order: elliptic.n,
-        };
-        base.multiply(k).restore()
-    }
-}
-
 
 /// Jacobian coordinates: (x, y, z)  y^2 = x^3 + axz^4 + bz^6
 /// Affine coordinates: (X = x/z^2, Y = y/z^3)  Y^2 = X^3 + aX +b
 #[derive(Clone, Debug)]
-struct P256AffinePoint(Payload, Payload);
+pub(crate) struct P256AffinePoint(Payload, Payload);
 
-/// 基点
-#[derive(Clone, Debug)]
-struct P256BasePoint {
-    point: P256AffinePoint,
-    order: BigUint,
-}
-
-impl P256BasePoint {
-    ///  Scalar is a little-endian number. Note that the value of scalar must be less than the order of the group.
-    fn bytes_of_scalar(&self, scalar: BigUint) -> [u8; 32] {
-        let scalar = {
-            // compare scalar and order, n = (scalar mod order) if scalar > order else scalar
-            if let Ordering::Greater = scalar.cmp(&self.order) {
-                scalar.mod_floor(&self.order)
-            } else {
-                scalar
-            }
-        };
-
-        let mut scalar_bytes = [0u8; 32];
-        for (i, v) in scalar.to_bytes_le().iter().enumerate() {
-            scalar_bytes[i] = *v;
-        }
-        scalar_bytes
+impl P256AffinePoint {
+    pub(crate) fn new(x: Payload, y: Payload) -> Self {
+        P256AffinePoint(x, y)
     }
 }
 
-/// Jacobian coordinates: (x, y, z)  y^2 = x^3 + axz^4 + bz^6
-#[derive(Debug)]
-struct P256JacobianPoint(Payload, Payload, Payload);
-
-
 impl P256AffinePoint {
-    fn restore(&self) -> (BigUint, BigUint) {
+    pub(crate) fn restore(&self) -> (BigUint, BigUint) {
         let x = PayloadHelper::restore(&self.0).to_biguint().unwrap();
         let y = PayloadHelper::restore(&self.1).to_biguint().unwrap();
         (x, y)
@@ -136,6 +52,81 @@ impl P256AffinePoint {
         P256AffinePoint(Payload::new(x), Payload::new(y))
     }
 }
+
+
+/// 基点
+#[derive(Clone, Debug)]
+#[allow(dead_code)]
+pub(crate) struct P256BasePoint {
+    point: P256AffinePoint,
+    order: BigUint,
+}
+
+impl P256BasePoint {
+    pub(crate) fn new(point: P256AffinePoint, order: BigUint) -> Self {
+        P256BasePoint { point, order }
+    }
+}
+
+impl Multiplication for P256BasePoint {
+    /// multiply sets P256Point = scalar*G where scalar is a little-endian number.
+    fn multiply(&self, scalar: [u8; 32]) -> P256AffinePoint {
+        let mut jacobian_point = P256JacobianPoint(
+            Payload::init(), Payload::init(), Payload::init(),
+        );
+
+        let mut n_is_infinity_mask = !(0 as u32);   // u32::MAX
+        // The loop adds bits at positions 0, 64, 128 and 192, followed by positions 32, 96, 160
+        // and 224 and does this 32 times.
+        for i in 0..32 {
+            if i != 0 {
+                jacobian_point = jacobian_point.double();
+            }
+            let mut offset = 0;
+            let mut j = 0;
+            while j <= 32 {
+                let bit0 = bit_of_scalar(scalar, 31 - i + j);
+                let bit1 = bit_of_scalar(scalar, 95 - i + j);
+                let bit2 = bit_of_scalar(scalar, 159 - i + j);
+                let bit3 = bit_of_scalar(scalar, 223 - i + j);
+                let idx = bit0 | (bit1 << 1) | (bit2 << 2) | (bit3 << 3);
+
+                let affine_point = P256AffinePoint::select(
+                    idx,
+                    Vec::from(&BASE_TABLE[offset..]),
+                );
+
+                offset += 30 * 9;
+
+                let temp = jacobian_point.add_affine_point(&affine_point);
+                jacobian_point = jacobian_point.copy_from_with_conditional(
+                    P256JacobianPoint(
+                        affine_point.0.clone(),
+                        affine_point.1.clone(),
+                        Payload::new(P256FACTOR[1]),
+                    ),
+                    n_is_infinity_mask,
+                );
+
+                let p_is_finite_mask = mask(idx);
+                let mask = p_is_finite_mask & !n_is_infinity_mask;
+
+                jacobian_point = jacobian_point.copy_from_with_conditional(temp, mask);
+
+                // If p was not zero, then n is now non-zero.
+                n_is_infinity_mask = n_is_infinity_mask & !p_is_finite_mask;
+
+                j += 32;
+            }
+        }
+        jacobian_point.to_affine_point()
+    }
+}
+
+/// Jacobian coordinates: (x, y, z)  y^2 = x^3 + axz^4 + bz^6
+#[derive(Debug)]
+struct P256JacobianPoint(Payload, Payload, Payload);
+
 
 impl P256JacobianPoint {
     /// (x, y, z) => 2 * (x, y, z)
@@ -168,7 +159,7 @@ impl P256JacobianPoint {
     /// See https://www.hyperelliptic.org/EFD/g1p/auto-shortw-jacobian-0.html#addition-add-2007-bl
     ///
     /// Note that this function does not handle P+P, infinity+P nor P+infinity correctly.
-    fn add_affine(&self, affine: &P256AffinePoint) -> Self {
+    fn add_affine_point(&self, affine: &P256AffinePoint) -> Self {
         let (x1, y1, z1) = (&self.0, &self.1, &self.2);
         let (x2, y2) = (&affine.0, &affine.1);
 
@@ -202,7 +193,7 @@ impl P256JacobianPoint {
 
     /// sets out=source if mask = 0xffffffff in constant time.
     /// On entry: mask is either 0 or 0xffffffff.
-    fn copy_from(&self, source: P256JacobianPoint, mask: u32) -> Self {
+    fn copy_from_with_conditional(&self, source: P256JacobianPoint, mask: u32) -> Self {
         let (mut x, mut y, mut z) = (
             Payload::init().data(), Payload::init().data(), Payload::init().data()
         );
@@ -220,7 +211,7 @@ impl P256JacobianPoint {
 
     /// Jacobian coordinates: (x, y, z)  y^2 = x^3 + axz^4 + bz^6
     /// Affine coordinates: (X = x/z^2, Y = y/z^3)  Y^2 = X^3 + aX +b
-    fn to_affine(&self) -> P256AffinePoint {
+    fn to_affine_point(&self) -> P256AffinePoint {
         let elliptic = P256Elliptic::init();
         let z = PayloadHelper::restore(&self.2);
         let p = elliptic.ec.p.to_bigint().unwrap();
@@ -238,83 +229,12 @@ impl P256JacobianPoint {
 }
 
 
-trait Multiplication {
-    fn multiply(&self, scalar: BigUint) -> P256AffinePoint;
-}
-
 impl Multiplication for P256AffinePoint {
-    fn multiply(&self, scalar: BigUint) -> P256AffinePoint {
+    fn multiply(&self, scalar: [u8; 32]) -> P256AffinePoint {
         todo!()
     }
 }
 
-impl Multiplication for P256BasePoint {
-    /// multiply sets P256Point = scalar*G where scalar is a little-endian number.
-    fn multiply(&self, scalar: BigUint) -> P256AffinePoint {
-        let scalar = self.bytes_of_scalar(scalar);
-
-        let mut jacobian_point = P256JacobianPoint(
-            Payload::init(), Payload::init(), Payload::init(),
-        );
-        let mut jacobian_temp_point = P256JacobianPoint(
-            Payload::init(), Payload::init(), Payload::init(),
-        );
-
-        let mut n_is_infinity_mask = !(0 as u32);   // u32::MAX
-        // The loop adds bits at positions 0, 64, 128 and 192, followed by positions 32, 96, 160
-        // and 224 and does this 32 times.
-        for i in 0..32 {
-            if i != 0 {
-                jacobian_point = jacobian_point.double();
-            }
-            let mut offset = 0;
-            let mut j = 0;
-            while j <= 32 {
-                let bit0 = bit_of_scalar(scalar, 31 - i + j);
-                let bit1 = bit_of_scalar(scalar, 95 - i + j);
-                let bit2 = bit_of_scalar(scalar, 159 - i + j);
-                let bit3 = bit_of_scalar(scalar, 223 - i + j);
-                let idx = bit0 | (bit1 << 1) | (bit2 << 2) | (bit3 << 3);
-
-                let affine_point = P256AffinePoint::select(
-                    idx,
-                    Vec::from(&BASE_TABLE[offset..]),
-                );
-
-                offset += 30 * 9;
-
-                jacobian_temp_point = jacobian_point.add_affine(&affine_point);
-                jacobian_point = jacobian_point.copy_from(
-                    P256JacobianPoint(
-                        affine_point.0.clone(),
-                        affine_point.1.clone(),
-                        Payload::new(P256FACTOR[1]),
-                    ),
-                    n_is_infinity_mask,
-                );
-
-                let p_is_finite_mask = mask(idx);
-                let mask = p_is_finite_mask & !n_is_infinity_mask;
-
-                jacobian_point = jacobian_point.copy_from(jacobian_temp_point, mask);
-
-                // If p was not zero, then n is now non-zero.
-                n_is_infinity_mask = n_is_infinity_mask & !p_is_finite_mask;
-
-                j += 32;
-            }
-        }
-        jacobian_point.to_affine()
-    }
-}
-
-
-/// 0xffffffff for 0 < x <= 2^31  0xffffffff = 4294967295 = u32::MAX = 2^31 - 1
-/// 0 for x == 0 or x > 2^31.
-#[inline(always)]
-pub(crate) fn mask(x: u32) -> u32 {
-    x.wrapping_sub(1).wrapping_shr(31).wrapping_sub(1)
-}
 
 #[inline(always)]
 fn bit_of_scalar(scalar: [u8; 32], bit: usize) -> u32 {
@@ -355,7 +275,7 @@ mod tests {
         let x: [u32; 9] = [194013013, 230698553, 317844872, 128801727, 111436768, 164685344, 76578606, 217356592, 311205467];
         let y: [u32; 9] = [26049626, 112805900, 275795042, 259495837, 289529507, 146296588, 220416178, 146512122, 266185762];
 
-        let p = jacobian.to_affine();
+        let p = jacobian.to_affine_point();
         assert_eq!(p.0.data(), x);
         assert_eq!(p.1.data(), y);
     }
@@ -379,7 +299,7 @@ mod tests {
             Payload::new([404366665, 62541307, 262912748, 158805496, 464033083, 30021392, 180319644, 142373381, 27655256]),
         );
 
-        let p = p1.add_affine(&p2);
+        let p = p1.add_affine_point(&p2);
         assert_eq!(p.0.data(), p3.0.data());
         assert_eq!(p.1.data(), p3.1.data());
         assert_eq!(p.2.data(), p3.2.data());
