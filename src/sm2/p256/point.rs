@@ -245,6 +245,39 @@ impl P256JacobianPoint {
 
         P256AffinePoint(x, y)
     }
+
+    /// get the entry of table by index.
+    /// On entry: index < 16, table[0] must be zero.
+    fn select(index: u32, table: Vec<u32>) -> Self {
+        let (mut x, mut y, mut z) = (
+            Payload::init().data(), Payload::init().data(), Payload::init().data()
+        );
+        // The implicit value at index 0 is all zero.
+        // We don't need to perform that iteration of the loop because we already set out_* to zero.
+        for i in 0..16 {
+            let mut mask = i ^ index;
+            mask |= mask >> 2;
+            mask |= mask >> 1;
+            mask &= 1;
+            mask = mask.wrapping_sub(1);
+
+            for j in 0..9 {
+                x[j] |= table[i as usize][0][j] & mask;
+            }
+            for j in 0..9 {
+                y[j] |= table[i as usize][1][j] & mask
+            }
+            for j in 0..9 {
+                z[j] |= table[i as usize][2][j] & mask
+            }
+        }
+
+        let x = Payload::new(x);
+        let y = Payload::new(y);
+        let z = Payload::new(z);
+
+        P256JacobianPoint(x, y, z)
+    }
 }
 
 
