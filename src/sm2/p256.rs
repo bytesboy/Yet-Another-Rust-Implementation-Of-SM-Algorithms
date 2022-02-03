@@ -53,22 +53,19 @@ impl EllipticProvider for P256Elliptic {
             PayloadHelper::transform(&x.to_bigint().unwrap()),
             PayloadHelper::transform(&y.to_bigint().unwrap()),
         );
-        let scalar = self.scalar_to_bytes(scalar);
-        point.multiply(scalar).restore()
+        point.multiply(self.scalar_reduce(scalar)).restore()
     }
 
     fn scalar_base_multiply(&self, scalar: BigUint) -> (BigUint, BigUint) {
-        let elliptic = self.ec.clone();
+        let elliptic = self.blueprint();
         let base = P256BasePoint::new(
             P256AffinePoint::new(
                 PayloadHelper::transform(&elliptic.gx.to_bigint().unwrap()),
                 PayloadHelper::transform(&elliptic.gy.to_bigint().unwrap()),
             ),
-            elliptic.n,
+            elliptic.n.clone(),
         );
-
-        let scalar = self.scalar_to_bytes(scalar);
-        base.multiply(scalar).restore()
+        base.multiply(self.scalar_reduce(scalar)).restore()
     }
 }
 

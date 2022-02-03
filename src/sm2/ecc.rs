@@ -9,22 +9,15 @@ pub trait EllipticProvider {
     fn scalar_multiply(&self, x: BigUint, y: BigUint, scalar: BigUint) -> (BigUint, BigUint);
     /// 基点标量乘法
     fn scalar_base_multiply(&self, scalar: BigUint) -> (BigUint, BigUint);
-    /// 标量转换为字节数组，小端存储，小于循环子群的阶
-    fn scalar_to_bytes(&self, scalar: BigUint) -> [u8; 32] {
+    /// 标量缩小：小于循环子群的阶
+    fn scalar_reduce(&self, scalar: BigUint) -> BigUint {
         let elliptic = self.blueprint();
-        let s = {
-            // compare scalar and order, n = (scalar mod order) if scalar > order else scalar
-            if let Ordering::Greater = scalar.cmp(&elliptic.n) {
-                scalar.mod_floor(&elliptic.n)
-            } else {
-                scalar
-            }
-        };
-        let mut scalar_bytes = [0u8; 32];
-        for (i, v) in s.to_bytes_le().iter().enumerate() {
-            scalar_bytes[i] = *v;
+        // compare scalar and order, n = (scalar mod order) if scalar > order else scalar
+        if let Ordering::Greater = scalar.cmp(&elliptic.n) {
+            scalar.mod_floor(&elliptic.n)
+        } else {
+            scalar
         }
-        scalar_bytes
     }
 }
 

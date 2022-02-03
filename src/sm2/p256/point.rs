@@ -1,12 +1,15 @@
-use num_bigint::{BigUint, ToBigInt};
+use std::ops::{BitAnd, Shr};
+
+use num_bigint::{BigUint, Sign, ToBigInt};
 use num_integer::Integer;
+use num_traits::ToPrimitive;
 
 use crate::sm2::p256::{mask, P256Elliptic};
 use crate::sm2::p256::params::{BASE_TABLE, P256FACTOR};
 use crate::sm2::p256::payload::{Payload, PayloadHelper};
 
 pub(crate) trait Multiplication {
-    fn multiply(&self, scalar: [u8; 32]) -> P256AffinePoint;
+    fn multiply(&self, scalar: BigUint) -> P256AffinePoint;
 }
 
 /// Jacobian coordinates: (x, y, z)  y^2 = x^3 + axz^4 + bz^6
@@ -18,9 +21,7 @@ impl P256AffinePoint {
     pub(crate) fn new(x: Payload, y: Payload) -> Self {
         P256AffinePoint(x, y)
     }
-}
 
-impl P256AffinePoint {
     pub(crate) fn restore(&self) -> (BigUint, BigUint) {
         let x = PayloadHelper::restore(&self.0).to_biguint().unwrap();
         let y = PayloadHelper::restore(&self.1).to_biguint().unwrap();
@@ -54,6 +55,16 @@ impl P256AffinePoint {
 }
 
 
+impl Multiplication for P256AffinePoint {
+    fn multiply(&self, scalar: BigUint) -> P256AffinePoint {
+        let scalar = w_naf(scalar);
+
+
+        todo!()
+    }
+}
+
+
 /// 基点
 #[derive(Clone, Debug)]
 #[allow(dead_code)]
@@ -70,8 +81,16 @@ impl P256BasePoint {
 
 impl Multiplication for P256BasePoint {
     /// multiply sets P256Point = scalar*G where scalar is a little-endian number.
-    fn multiply(&self, scalar: [u8; 32]) -> P256AffinePoint {
-        let mut jacobian_point = P256JacobianPoint(
+    fn multiply(&self, scalar: BigUint) -> P256AffinePoint {
+        let scalar = {
+            let mut bytes = [0u8; 32];
+            for (i, v) in scalar.to_bytes_le().iter().enumerate() {
+                bytes[i] = *v;
+            }
+            bytes
+        };
+
+        let mut jacobian = P256JacobianPoint(
             Payload::init(), Payload::init(), Payload::init(),
         );
 
@@ -80,7 +99,7 @@ impl Multiplication for P256BasePoint {
         // and 224 and does this 32 times.
         for i in 0..32 {
             if i != 0 {
-                jacobian_point = jacobian_point.double();
+                jacobian = jacobian.double();
             }
             let mut offset = 0;
             let mut j = 0;
@@ -91,18 +110,18 @@ impl Multiplication for P256BasePoint {
                 let bit3 = bit_of_scalar(scalar, 223 - i + j);
                 let idx = bit0 | (bit1 << 1) | (bit2 << 2) | (bit3 << 3);
 
-                let affine_point = P256AffinePoint::select(
+                let affine = P256AffinePoint::select(
                     idx,
                     Vec::from(&BASE_TABLE[offset..]),
                 );
 
                 offset += 30 * 9;
 
-                let temp = jacobian_point.add_affine_point(&affine_point);
-                jacobian_point = jacobian_point.copy_from_with_conditional(
+                let temp = jacobian.add_affine_point(&affine);
+                jacobian = jacobian.copy_from_with_conditional(
                     P256JacobianPoint(
-                        affine_point.0.clone(),
-                        affine_point.1.clone(),
+                        affine.0.clone(),
+                        affine.1.clone(),
                         Payload::new(P256FACTOR[1]),
                     ),
                     n_is_infinity_mask,
@@ -111,7 +130,7 @@ impl Multiplication for P256BasePoint {
                 let p_is_finite_mask = mask(idx);
                 let mask = p_is_finite_mask & !n_is_infinity_mask;
 
-                jacobian_point = jacobian_point.copy_from_with_conditional(temp, mask);
+                jacobian = jacobian.copy_from_with_conditional(temp, mask);
 
                 // If p was not zero, then n is now non-zero.
                 n_is_infinity_mask = n_is_infinity_mask & !p_is_finite_mask;
@@ -119,7 +138,7 @@ impl Multiplication for P256BasePoint {
                 j += 32;
             }
         }
-        jacobian_point.to_affine_point()
+        jacobian.to_affine_point()
     }
 }
 
@@ -229,18 +248,57 @@ impl P256JacobianPoint {
 }
 
 
-impl Multiplication for P256AffinePoint {
-    fn multiply(&self, scalar: [u8; 32]) -> P256AffinePoint {
-        todo!()
-    }
-}
-
-
 #[inline(always)]
 fn bit_of_scalar(scalar: [u8; 32], bit: usize) -> u32 {
     (((scalar[bit >> 3]) >> (bit & 7)) & 1) as u32
 }
 
+#[inline(always)]
+fn w_naf(scalar: BigUint) -> Vec<i8> {
+    let mut k = scalar;
+
+    let bits = k.bits() as usize;
+    let mut naf: Vec<i8> = vec![0; bits + 1];
+
+    if let Sign::NoSign = k.to_bigint().unwrap().sign() {
+        return naf;
+    }
+
+    let mut carry = false;
+    let mut length: usize = 0;
+    let mut pos: usize = 0;
+
+    while pos <= bits {
+        let s = k.clone().shr(pos).bitand(BigUint::from(1u64));
+        if s.to_usize().unwrap() == (carry as usize) {
+            pos += 1;
+            continue;
+        }
+        k = k.shr(pos);
+        let mask = BigUint::from(15usize);
+        let mut digit: isize = k.clone().bitand(mask).to_isize().unwrap();
+        if carry {
+            digit += 1;
+        }
+        carry = (digit & 8) != 0;
+        if carry {
+            digit -= 16;
+        }
+        length += pos;
+        naf[length] = digit as i8;
+        pos = 4usize;
+    }
+
+    if naf.len() > length + 1 {
+        let mut t = vec![0; length + 1];
+        for (d, s) in t.iter_mut().zip(naf[0..(length + 1)].iter()) {
+            *d = *s;
+        }
+        naf = t
+    }
+    naf.reverse();
+    naf
+}
 
 #[cfg(test)]
 mod tests {
