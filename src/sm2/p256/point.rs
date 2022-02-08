@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::ops::{BitAnd, Shr};
 
 use num_bigint::{BigUint, Sign, ToBigInt};
@@ -248,7 +249,7 @@ impl P256JacobianPoint {
 
     /// get the entry of table by index.
     /// On entry: index < 16, table[0] must be zero.
-    fn select(index: u32, table: Vec<u32>) -> Self {
+    fn select(index: u32, table: [P256JacobianPoint; 16]) -> Self {
         let (mut x, mut y, mut z) = (
             Payload::init().data(), Payload::init().data(), Payload::init().data()
         );
@@ -261,14 +262,14 @@ impl P256JacobianPoint {
             mask &= 1;
             mask = mask.wrapping_sub(1);
 
+            let data4x = table[i as usize].0.data();
+            let data4y = table[i as usize].1.data();
+            let data4z = table[i as usize].2.data();
+
             for j in 0..9 {
-                x[j] |= table[i as usize][0][j] & mask;
-            }
-            for j in 0..9 {
-                y[j] |= table[i as usize][1][j] & mask
-            }
-            for j in 0..9 {
-                z[j] |= table[i as usize][2][j] & mask
+                x[j] |= data4x[j] & mask;
+                y[j] |= data4y[j] & mask;
+                z[j] |= data4z[j] & mask;
             }
         }
 
@@ -277,6 +278,74 @@ impl P256JacobianPoint {
         let z = Payload::new(z);
 
         P256JacobianPoint(x, y, z)
+    }
+
+    /// (x3, y3, z3) = (x1, y1, z1) + (x2, y2, z2)
+    ///
+    /// See https://www.hyperelliptic.org/EFD/g1p/auto-shortw-jacobian-0.html#addition-add-2007-bl
+    fn add(&self, other: &P256JacobianPoint) -> Self {
+        let (x1, y1, z1) = (&self.0, &self.1, &self.2);
+        let (x2, y2, z2) = (&other.0, &other.1, &other.2);
+
+        // z1 = 0
+        if let Sign::NoSign = PayloadHelper::restore(z1).sign() {
+            return P256JacobianPoint(x2.clone(), y2.clone(), z2.clone());
+        }
+        // z2 = 0
+        if let Sign::NoSign = PayloadHelper::restore(z2).sign() {
+            return P256JacobianPoint(x1.clone(), y1.clone(), z1.clone());
+        }
+
+        let z12 = z1.square();
+        let z22 = z2.square();
+
+        let z13 = z12.multiply(z1);
+        let z23 = z22.multiply(z2);
+
+        // u1 = x1 * z2^2  u2 = x2 * z1^2
+        let u1 = x1.multiply(&z22);
+        let u2 = x2.multiply(&z12);
+
+        // s1 = y1 * z2^3  s2 = y2 * z1^3
+        let s1 = y1.multiply(&z23);
+        let s2 = y2.multiply(&z13);
+
+        let u1b = PayloadHelper::restore(&u1);
+        let u2b = PayloadHelper::restore(&u2);
+        let s1b = PayloadHelper::restore(&s1);
+        let s2b = PayloadHelper::restore(&s2);
+
+        if Ordering::Equal == u1b.cmp(&u2b) && Ordering::Equal == s1b.cmp(&s2b) {
+            let p = self.double();
+            let rx = &mut self.0.data() as *mut [u32; 9];
+            let ry = &mut self.1.data() as *mut [u32; 9];
+            let rz = &mut self.2.data() as *mut [u32; 9];
+            unsafe {
+                *rx = p.0.data();
+                *ry = p.1.data();
+                *rz = p.2.data();
+            }
+        }
+
+        let h = u2.subtract(&u1);
+        let r = s2.subtract(&s1);
+
+        let r2 = r.square();
+        let h2 = h.square();
+        let h3 = h2.multiply(&h);
+
+        let tmp = u1.multiply(&h2);
+
+        let x3 = r2.subtract(&h2.multiply(&h)).subtract(&tmp.scalar_multiply(2));
+        let y3 = r.multiply(&tmp.subtract(&x3)).subtract(&h3.multiply(&s1));
+        let z3 = z1.multiply(&z2).multiply(&h);
+
+        P256JacobianPoint(x3, y3, z3)
+    }
+
+    /// (x3, y3, z3) = (x1, y1, z1) - (x2, y2, z2)
+    fn subtract(&self, other: P256JacobianPoint) -> Self {
+        todo!()
     }
 }
 
@@ -394,5 +463,49 @@ mod tests {
         assert_eq!(p.0.data(), p3.0.data());
         assert_eq!(p.1.data(), p3.1.data());
         assert_eq!(p.2.data(), p3.2.data());
+    }
+
+    #[test]
+    fn add_jacobian() {
+        let p1 = P256JacobianPoint(
+            Payload::new([15836985, 237615575, 1003296804, 75260899, 257296110, 164819571, 189677500, 193598460, 90010972]),
+            Payload::new([212129426, 35715106, 595472568, 72609634, 534980146, 223166621, 407975907, 275453678, 407352715]),
+            Payload::new([409829874, 163084764, 1067221421, 13248501, 288009690, 79741432, 109716961, 249517026, 11551783]),
+        );
+
+        let p2 = P256JacobianPoint(
+            Payload::new([450658017, 114832731, 822344930, 194890865, 208412501, 226997724, 24789671, 207292977, 210587781]),
+            Payload::new([204066633, 242987096, 737448716, 72708158, 52939751, 81314027, 105804213, 350393582, 531824490]),
+            Payload::new([168032711, 112895108, 29434237, 201919115, 408021630, 218607929, 119000400, 114548688, 101652253]),
+        );
+
+
+        let p3 = p1.add(&p2);
+
+        assert_eq!(p3.0.data(), [149709477, 218409799, 937019402, 10010236, 274079627, 236790273, 355340786, 322396729, 248575693]);
+        assert_eq!(p3.1.data(), [479630446, 216415583, 942260448, 162419905, 280718920, 252976522, 412998714, 322607488, 450885885]);
+        assert_eq!(p3.2.data(), [249526382, 250774702, 256961694, 256982027, 129318302, 181001519, 78728372, 41746828, 192991613]);
+    }
+
+    #[test]
+    fn add_jacobian_2() {
+        let p1 = P256JacobianPoint(
+            Payload::new([536870910, 268435455, 536871167, 268433407, 536870911, 268435455, 536870911, 234881023, 536870911]),
+            Payload::new([536870910, 268435455, 536871167, 268433407, 536870911, 268435455, 536870911, 234881023, 536870911]),
+            Payload::new([536870910, 268435455, 536871167, 268433407, 536870911, 268435455, 536870911, 234881023, 536870911]),
+        );
+
+        let p2 = P256JacobianPoint(
+            Payload::new([213941498, 21300983, 60022125, 97060820, 192974655, 35884974, 326765193, 113910449, 256521185]),
+            Payload::new([57250121, 220765648, 315404192, 140781057, 276132260, 27646902, 354194608, 33763371, 49435241]),
+            Payload::new([2, 0, 536870656, 2047, 0, 0, 0, 33554432, 0]),
+        );
+
+
+        let p3 = p1.add(&p2);
+
+        assert_eq!(p3.0.data(), [213941498, 21300983, 60022125, 97060820, 192974655, 35884974, 326765193, 113910449, 256521185]);
+        assert_eq!(p3.1.data(), [57250121, 220765648, 315404192, 140781057, 276132260, 27646902, 354194608, 33763371, 49435241]);
+        assert_eq!(p3.2.data(), [2, 0, 536870656, 2047, 0, 0, 0, 33554432, 0]);
     }
 }
