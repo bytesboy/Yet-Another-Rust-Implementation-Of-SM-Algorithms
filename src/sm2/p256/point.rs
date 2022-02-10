@@ -1,10 +1,9 @@
-use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::ops::{BitAnd, Neg, Shr};
 
-use num_bigint::{BigInt, BigUint, Sign, ToBigInt};
+use num_bigint::{BigUint, Sign, ToBigInt};
 use num_integer::Integer;
-use num_traits::{ToPrimitive, Zero};
+use num_traits::ToPrimitive;
 
 use crate::sm2::p256::{mask, P256Elliptic};
 use crate::sm2::p256::params::{BASE_TABLE, P256FACTOR};
@@ -59,10 +58,86 @@ impl P256AffinePoint {
 
 impl Multiplication for P256AffinePoint {
     fn multiply(&self, scalar: BigUint) -> P256AffinePoint {
+        let points = {
+            let mut precomp: [[[u32; 9]; 3]; 16] = [[[0; 9]; 3]; 16];
+
+            precomp[1][0] = self.0.data();
+            precomp[1][1] = self.1.data();
+            precomp[1][2] = P256FACTOR[1];
+
+            let mut i = 2;
+            while i < 8 {
+                let p = P256JacobianPoint(
+                    Payload::new(precomp[i / 2][0]),
+                    Payload::new(precomp[i / 2][1]),
+                    Payload::new(precomp[i / 2][2]),
+                );
+                let temp = p.double();
+                precomp[i][0] = temp.0.data();
+                precomp[i][1] = temp.1.data();
+                precomp[i][2] = temp.2.data();
+
+                let p = P256JacobianPoint(
+                    Payload::new(precomp[i][0]),
+                    Payload::new(precomp[i][1]),
+                    Payload::new(precomp[i][2]),
+                );
+                let temp = p.add_affine(&self);
+                precomp[i + 1][0] = temp.0.data();
+                precomp[i + 1][1] = temp.1.data();
+                precomp[i + 1][2] = temp.2.data();
+
+                i += 2;
+            }
+            precomp
+        };
+
         let scalar = w_naf(scalar);
+        let mut n_is_infinity_mask = u32::MAX;
+        let mut counter = 0u16;
 
+        let mut p1 = P256JacobianPoint(
+            Payload::init(), Payload::init(), Payload::init(),
+        );
+        // let mut p2 = P256JacobianPoint(
+        //     Payload::init(), Payload::init(), Payload::init(),
+        // );
 
-        todo!()
+        for i in 0..scalar.len() {
+            if scalar[i] == 0 {
+                counter += 1;
+                continue;
+            }
+            while counter > 0 {
+                p1 = p1.double();
+                counter -= 1;
+            }
+
+            let idx = (scalar[i].abs()) as u32;
+            p1 = p1.double();
+            let p2 = P256JacobianPoint::select(idx, points);
+
+            let p3 = {
+                if scalar[i] > 0 {
+                    p1.add(&p2)
+                } else {
+                    p1.subtract(&p2)
+                }
+            };
+
+            p1 = p1.copy_from_with_conditional(p2, n_is_infinity_mask);
+            let p_is_finite_mask = mask(idx);
+            let msk = p_is_finite_mask & !(n_is_infinity_mask);
+            p1 = p1.copy_from_with_conditional(p3, msk);
+            n_is_infinity_mask &= !(p_is_finite_mask);
+        }
+
+        while counter > 0 {
+            p1 = p1.double();
+            counter -= 1;
+        }
+
+        p1.to_affine_point()
     }
 }
 
@@ -119,7 +194,7 @@ impl Multiplication for P256BasePoint {
 
                 offset += 30 * 9;
 
-                let temp = jacobian.add_affine_point(&affine);
+                let temp = jacobian.add_affine(&affine);
                 jacobian = jacobian.copy_from_with_conditional(
                     P256JacobianPoint(
                         affine.0.clone(),
@@ -145,7 +220,7 @@ impl Multiplication for P256BasePoint {
 }
 
 /// Jacobian coordinates: (x, y, z)  y^2 = x^3 + axz^4 + bz^6
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug)]
 struct P256JacobianPoint(Payload, Payload, Payload);
 
 
@@ -180,7 +255,7 @@ impl P256JacobianPoint {
     /// See https://www.hyperelliptic.org/EFD/g1p/auto-shortw-jacobian-0.html#addition-add-2007-bl
     ///
     /// Note that this function does not handle P+P, infinity+P nor P+infinity correctly.
-    fn add_affine_point(&self, affine: &P256AffinePoint) -> Self {
+    fn add_affine(&self, affine: &P256AffinePoint) -> Self {
         let (x1, y1, z1) = (&self.0, &self.1, &self.2);
         let (x2, y2) = (&affine.0, &affine.1);
 
@@ -250,10 +325,8 @@ impl P256JacobianPoint {
 
     /// get the entry of table by index.
     /// On entry: index < 16, table[0] must be zero.
-    fn select(index: u32, table: [P256JacobianPoint; 16]) -> Self {
-        let (mut x, mut y, mut z) = (
-            Payload::init().data(), Payload::init().data(), Payload::init().data()
-        );
+    fn select(index: u32, table: [[[u32; 9]; 3]; 16]) -> Self {
+        let (mut x, mut y, mut z) = ([0u32; 9], [0u32; 9], [0u32; 9]);
         // The implicit value at index 0 is all zero.
         // We don't need to perform that iteration of the loop because we already set out_* to zero.
         for i in 0..16 {
@@ -263,14 +336,10 @@ impl P256JacobianPoint {
             mask &= 1;
             mask = mask.wrapping_sub(1);
 
-            let data4x = table[i as usize].0.data();
-            let data4y = table[i as usize].1.data();
-            let data4z = table[i as usize].2.data();
-
             for j in 0..9 {
-                x[j] |= data4x[j] & mask;
-                y[j] |= data4y[j] & mask;
-                z[j] |= data4z[j] & mask;
+                x[j] |= table[i as usize][0][j] & mask;
+                y[j] |= table[i as usize][1][j] & mask;
+                z[j] |= table[i as usize][2][j] & mask;
             }
         }
 
@@ -405,9 +474,7 @@ fn w_naf(scalar: BigUint) -> Vec<i8> {
 
 #[cfg(test)]
 mod tests {
-    use std::ops::Neg;
-
-    use num_traits::zero;
+    use num_traits::Num;
 
     use super::*;
 
@@ -464,7 +531,7 @@ mod tests {
             Payload::new([404366665, 62541307, 262912748, 158805496, 464033083, 30021392, 180319644, 142373381, 27655256]),
         );
 
-        let p = p1.add_affine_point(&p2);
+        let p = p1.add_affine(&p2);
         assert_eq!(p.0.data(), p3.0.data());
         assert_eq!(p.1.data(), p3.1.data());
         assert_eq!(p.2.data(), p3.2.data());
@@ -510,5 +577,23 @@ mod tests {
         assert_eq!(p3.0.data(), [295090358, 236992739, 800053525, 147234841, 281370475, 197897281, 305280418, 361835277, 162960459]);
         assert_eq!(p3.1.data(), [229663282, 133755872, 656501873, 17946166, 228212011, 56920858, 395700549, 125368282, 347100819]);
         assert_eq!(p3.2.data(), [234698535, 154439292, 363189331, 134307834, 513337116, 113297570, 189927841, 204178274, 333316045]);
+    }
+
+    #[test]
+    fn point_multiply() {
+        let scalar = BigUint::from_str_radix("52097475535247475123296179337062319910931289617245574116042610944477699996763", 10).unwrap();
+        let p = P256AffinePoint::new(
+            Payload::new([213941498, 21300983, 60022125, 97060820, 192974655, 35884974, 326765193, 113910449, 256521185]),
+            Payload::new([57250121, 220765648, 315404192, 140781057, 276132260, 27646902, 354194608, 33763371, 49435241]),
+        );
+
+        let point = p.multiply(scalar);
+        let (x, y) = (PayloadHelper::restore(&point.0), PayloadHelper::restore(&point.1));
+
+        let rx = BigUint::from_str_radix("86785762605949049655217626947696016468061046596615849956268278837626813985762", 10).unwrap();
+        let ry = BigUint::from_str_radix("43927620980048020323390743598648642157054712812706113912175335564413059446606", 10).unwrap();
+
+        assert_eq!(x.to_biguint().unwrap(), rx);
+        assert_eq!(y.to_biguint().unwrap(), ry);
     }
 }

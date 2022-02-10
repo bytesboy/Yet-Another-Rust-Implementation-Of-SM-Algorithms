@@ -43,7 +43,7 @@ enum LimbPattern {
     WIDTH29BITS = 0x1FFFFFFF,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Copy, Debug, Clone)]
 pub(crate) struct Payload {
     data: [u32; 9],
 }
