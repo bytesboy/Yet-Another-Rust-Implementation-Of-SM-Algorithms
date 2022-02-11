@@ -7,7 +7,7 @@ use num_traits::FromPrimitive;
 use crate::sm2::ecc::EllipticProvider;
 
 pub trait HexKey {
-    fn to_hex_string(&self) -> String;
+    fn encode(&self) -> String;
 }
 
 /// 公钥
@@ -19,7 +19,7 @@ pub trait HexKey {
 pub struct PublicKey(BigUint, BigUint);
 
 impl HexKey for PublicKey {
-    fn to_hex_string(&self) -> String {
+    fn encode(&self) -> String {
         let (x, y) = (self.0.to_bytes_be(), self.1.to_bytes_be());
         if x.len() != 32 || y.len() != 32 {
             panic!("Public key error, x and y coordinates must be 32 bytes.")
@@ -45,7 +45,7 @@ impl HexKey for PublicKey {
 pub struct PrivateKey(BigUint);
 
 impl HexKey for PrivateKey {
-    fn to_hex_string(&self) -> String {
+    fn encode(&self) -> String {
         let key_bytes = self.0.to_bytes_be();
         if key_bytes.len() != 32 {
             panic!("Private key error, it must be 32 bytes.")
@@ -141,7 +141,7 @@ mod tests {
         assert_eq!(public_key.0.to_string(), "76298453107918256108319614943154283626396976993715724710320433578462434588530");
         assert_eq!(public_key.1.to_string(), "22016840577845663905050918262284081863871275223913804750000840645022838962798");
 
-        assert_eq!(private_key.to_hex_string(), "6aea1ccf610488aaa7fddba3dd6d76d3bdfd50f957d847be3d453defb695f28e");
-        assert_eq!(public_key.to_hex_string(), "04a8af64e38eea41c254df769b5b41fbaa2d77b226b301a2636d463c52b46c777230ad1714e686dd641b9e04596530b38f6a64215b0ed3b081f8641724c5443a6e");
+        assert_eq!(private_key.encode(), "6aea1ccf610488aaa7fddba3dd6d76d3bdfd50f957d847be3d453defb695f28e");
+        assert_eq!(public_key.encode(), "04a8af64e38eea41c254df769b5b41fbaa2d77b226b301a2636d463c52b46c777230ad1714e686dd641b9e04596530b38f6a64215b0ed3b081f8641724c5443a6e");
     }
 }
