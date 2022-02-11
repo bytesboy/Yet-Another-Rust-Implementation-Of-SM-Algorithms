@@ -137,6 +137,7 @@ mod tests {
         let generator = KeyGenerator::new(Box::new(P256Elliptic::init()));
         let public_key = generator.gen_public_key(&private_key);
 
+        assert_eq!(private_key.0.to_string(),"48358803002808206747871163666773640956067045543241775523137833706911222329998");
         assert_eq!(public_key.0.to_string(), "76298453107918256108319614943154283626396976993715724710320433578462434588530");
         assert_eq!(public_key.1.to_string(), "22016840577845663905050918262284081863871275223913804750000840645022838962798");
 
