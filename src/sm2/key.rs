@@ -2,13 +2,19 @@ use std::ops::{Add, Sub};
 
 use num_bigint::BigUint;
 use num_integer::Integer;
-use num_traits::FromPrimitive;
+use num_traits::{FromPrimitive, Num};
 
 use crate::sm2::ecc::EllipticProvider;
 
 pub trait HexKey {
     fn encode(&self) -> String;
+    fn decode(&self, key: String) -> Self;
 }
+
+// pub trait ZipHexKey {
+//     fn zip(&self) -> String;
+//     fn unzip(&self, key: String, elliptic: Box<dyn EllipticProvider>) -> Self;
+// }
 
 /// 公钥
 /// 非压缩公钥格式字节串长度为65字节，压缩格式长度为33字节;
@@ -22,7 +28,7 @@ impl HexKey for PublicKey {
     fn encode(&self) -> String {
         let (x, y) = (self.0.to_bytes_be(), self.1.to_bytes_be());
         if x.len() != 32 || y.len() != 32 {
-            panic!("Public key error, x and y coordinates must be 32 bytes.")
+            panic!("The public key is error, x and y coordinates must be 32 bytes.")
         }
         let key_bytes = {
             // key = 0x04 || x || y
@@ -38,7 +44,67 @@ impl HexKey for PublicKey {
         };
         hex::encode(key_bytes)
     }
+
+    fn decode(&self, key: String) -> Self {
+        if key.len() != 130 {
+            panic!("The uncompressed public key's length must be 130.")
+        }
+
+        if !key.starts_with("04") {
+            panic!("The compressed public key is invalid.")
+        }
+
+        let key = match hex::decode(key.trim_start_matches("04")) {
+            Ok(data) => data,
+            Err(_) => panic!("The public key must be composed of hex chars.")
+        };
+
+        PublicKey(
+            BigUint::from_bytes_be(&key[..32]),
+            BigUint::from_bytes_be(&key[33..]),
+        )
+    }
 }
+
+// impl ZipHexKey for PublicKey {
+//     fn zip(&self) -> String {
+//         let (x, y) = (self.0.to_bytes_be(), self.1.to_bytes_be());
+//         if x.len() != 32 || y.len() != 32 {
+//             panic!("The public key is error, x and y coordinates must be 32 bytes.")
+//         }
+//
+//         let key_bytes = {
+//             // key = 0x02 or 0x03 || x
+//             let mut key = vec![0u8; 33];
+//             if BigUint::zero() == self.1.clone().bitand(BigUint::from(1u8)) {
+//                 key[0] = 0x02;
+//             } else {
+//                 key[1] = 0x03;
+//             }
+//             for (dst, src) in key[1..].iter_mut().zip(x.iter()) {
+//                 *dst = *src;
+//             }
+//             key
+//         };
+//
+//         hex::encode(key_bytes)
+//     }
+//
+//     fn unzip(&self, key: String, elliptic: Box<dyn EllipticProvider>) -> Self {
+//         if key.len() != 66 {
+//             panic!("The compressed public key's length must be 66.")
+//         }
+//
+//         if !(key.starts_with("02") && key.starts_with("03")) {
+//             panic!("The compressed public key is invalid.")
+//         }
+//
+//         let x = match hex::decode(key.split_at(2).1) {
+//             Ok(data) => BigUint::from_bytes_be(data.as_slice()),
+//             Err(_) => panic!("The public key must be composed of hex chars.")
+//         };
+//     }
+// }
 
 /// 私钥 32bytes
 #[derive(Clone, Debug)]
@@ -48,11 +114,23 @@ impl HexKey for PrivateKey {
     fn encode(&self) -> String {
         let key_bytes = self.0.to_bytes_be();
         if key_bytes.len() != 32 {
-            panic!("Private key error, it must be 32 bytes.")
+            panic!("The private key is error, it must be 32 bytes.")
         }
         hex::encode(key_bytes)
     }
+
+    fn decode(&self, key: String) -> Self {
+        if key.len() != 64 {
+            panic!("The length of the private key must be 64.")
+        }
+        let key = match BigUint::from_str_radix(&*key, 16) {
+            Ok(data) => data,
+            Err(_) => panic!("The private key must be composed of hex chars.")
+        };
+        PrivateKey(key)
+    }
 }
+
 
 /// 秘钥对（d, P）d:私钥 P:公钥
 #[derive(Debug)]
@@ -110,6 +188,8 @@ impl KeyGenerator {
 
 #[cfg(test)]
 mod tests {
+    use std::ops::Div;
+
     use num_traits::Num;
 
     use crate::sm2::p256::P256Elliptic;
@@ -137,7 +217,7 @@ mod tests {
         let generator = KeyGenerator::new(Box::new(P256Elliptic::init()));
         let public_key = generator.gen_public_key(&private_key);
 
-        assert_eq!(private_key.0.to_string(),"48358803002808206747871163666773640956067045543241775523137833706911222329998");
+        assert_eq!(private_key.0.to_string(), "48358803002808206747871163666773640956067045543241775523137833706911222329998");
         assert_eq!(public_key.0.to_string(), "76298453107918256108319614943154283626396976993715724710320433578462434588530");
         assert_eq!(public_key.1.to_string(), "22016840577845663905050918262284081863871275223913804750000840645022838962798");
 
