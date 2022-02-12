@@ -8,7 +8,7 @@ use crate::sm2::ecc::EllipticProvider;
 
 pub trait HexKey {
     fn encode(&self) -> String;
-    fn decode(&self, key: String) -> Self;
+    fn decode(key: String) -> Self;
 }
 
 // pub trait ZipHexKey {
@@ -45,7 +45,7 @@ impl HexKey for PublicKey {
         hex::encode(key_bytes)
     }
 
-    fn decode(&self, key: String) -> Self {
+    fn decode(key: String) -> Self {
         if key.len() != 130 {
             panic!("The uncompressed public key's length must be 130.")
         }
@@ -61,7 +61,7 @@ impl HexKey for PublicKey {
 
         PublicKey(
             BigUint::from_bytes_be(&key[..32]),
-            BigUint::from_bytes_be(&key[33..]),
+            BigUint::from_bytes_be(&key[32..]),
         )
     }
 }
@@ -119,7 +119,7 @@ impl HexKey for PrivateKey {
         hex::encode(key_bytes)
     }
 
-    fn decode(&self, key: String) -> Self {
+    fn decode(key: String) -> Self {
         if key.len() != 64 {
             panic!("The length of the private key must be 64.")
         }
@@ -205,7 +205,7 @@ mod tests {
     }
 
     #[test]
-    fn key_generator() {
+    fn generator() {
         // d: 48358803002808206747871163666773640956067045543241775523137833706911222329998
         // x: 76298453107918256108319614943154283626396976993715724710320433578462434588530
         // y: 22016840577845663905050918262284081863871275223913804750000840645022838962798
@@ -223,5 +223,18 @@ mod tests {
 
         assert_eq!(private_key.encode(), "6aea1ccf610488aaa7fddba3dd6d76d3bdfd50f957d847be3d453defb695f28e");
         assert_eq!(public_key.encode(), "04a8af64e38eea41c254df769b5b41fbaa2d77b226b301a2636d463c52b46c777230ad1714e686dd641b9e04596530b38f6a64215b0ed3b081f8641724c5443a6e");
+    }
+
+    #[test]
+    fn key() {
+        let prk = "6aea1ccf610488aaa7fddba3dd6d76d3bdfd50f957d847be3d453defb695f28e";
+        let puk = "04a8af64e38eea41c254df769b5b41fbaa2d77b226b301a2636d463c52b46c777230ad1714e686dd641b9e04596530b38f6a64215b0ed3b081f8641724c5443a6e";
+
+        let private_key = PrivateKey::decode(String::from(prk));
+        assert_eq!(private_key.0.to_string(), "48358803002808206747871163666773640956067045543241775523137833706911222329998");
+
+        let public_key = PublicKey::decode(String::from(puk));
+        assert_eq!(public_key.0.to_string(), "76298453107918256108319614943154283626396976993715724710320433578462434588530");
+        assert_eq!(public_key.1.to_string(), "22016840577845663905050918262284081863871275223913804750000840645022838962798");
     }
 }
