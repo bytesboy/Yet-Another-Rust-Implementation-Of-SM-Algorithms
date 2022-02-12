@@ -188,12 +188,7 @@ impl KeyGenerator {
 
 #[cfg(test)]
 mod tests {
-    use std::ops::Div;
-
-    use num_traits::Num;
-
     use crate::sm2::p256::P256Elliptic;
-
     use super::*;
 
     #[test]
