@@ -4,7 +4,7 @@ use num_bigint::BigUint;
 use num_integer::Integer;
 use num_traits::{FromPrimitive, Num};
 
-use crate::sm2::ecc::EllipticProvider;
+use crate::sm2::ecc::EllipticBuilder;
 
 pub trait HexKey {
     fn encode(&self) -> String;
@@ -147,12 +147,12 @@ impl KeyPair {
 
 /// 秘钥生成器
 pub struct KeyGenerator {
-    elliptic: Box<dyn EllipticProvider>,
+    builder: Box<dyn EllipticBuilder>,
 }
 
 impl KeyGenerator {
-    pub fn new(elliptic: Box<dyn EllipticProvider>) -> Self {
-        KeyGenerator { elliptic }
+    pub fn new(builder: Box<dyn EllipticBuilder>) -> Self {
+        KeyGenerator { builder }
     }
 
     pub fn gen_key_pair(&self) -> KeyPair {
@@ -164,11 +164,10 @@ impl KeyGenerator {
     /// 生成私钥
     fn gen_private_key(&self) -> PrivateKey {
         // private key: 32 bytes
-        let elliptic = self.elliptic.blueprint();
+        let elliptic = self.builder.blueprint();
         // subgroup order
         let n = &elliptic.n;
-        let bytes: Vec<u8> = (0..elliptic.bits / 8 + 8).map(|_| { rand::random::<u8>() }).collect();
-        let k = BigUint::from_bytes_be(&bytes);
+        let k = elliptic.random();
         // n-2
         let n = BigUint::sub((*n).clone(), BigUint::from_u64(2).unwrap());
         // k % n  ∈ [0, n-1]  => k % (n-2) + 1  ∈ [1, n-2] => key ∈ [1, n-1)
@@ -180,7 +179,7 @@ impl KeyGenerator {
     ///
     /// P = (x,y) = dG, G为基点，d为私钥
     fn gen_public_key(&self, private_key: &PrivateKey) -> PublicKey {
-        let key = self.elliptic.scalar_base_multiply(private_key.0.clone());
+        let key = self.builder.scalar_base_multiply(private_key.0.clone());
         PublicKey(key.0, key.1)
     }
 }
