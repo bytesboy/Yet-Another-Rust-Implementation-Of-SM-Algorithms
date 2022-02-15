@@ -1,6 +1,6 @@
 mod core;
 
-/// 计算摘要信息
+/// 计算摘要信息：Hash值编码为Hex字符串
 pub fn digest(data: &str) -> String {
     hex::encode(hash(data.as_bytes()))
 }
