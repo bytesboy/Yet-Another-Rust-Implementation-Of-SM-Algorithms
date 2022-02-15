@@ -6,7 +6,7 @@ pub fn digest(data: &str) -> String {
 }
 
 /// 计算Hash值
-pub fn hash(data: vec<u8>) -> [u8; 32] {
+pub fn hash(data: &[u8]) -> [u8; 32] {
     core::Crypto::new(data).hash()
 }
 
