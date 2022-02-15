@@ -3,7 +3,7 @@ use std::sync::Once;
 
 use num_bigint::{BigUint, ToBigInt};
 
-use crate::sm2::ecc::{Elliptic, EllipticProvider};
+use crate::sm2::ecc::{Elliptic, EllipticBuilder};
 use crate::sm2::p256::params::{EC_A, EC_B, EC_GX, EC_GY, EC_N, EC_P, RI};
 use crate::sm2::p256::payload::PayloadHelper;
 use crate::sm2::p256::point::{Multiplication, P256AffinePoint, P256BasePoint};
@@ -43,7 +43,7 @@ impl P256Elliptic {
     }
 }
 
-impl EllipticProvider for P256Elliptic {
+impl EllipticBuilder for P256Elliptic {
     fn blueprint(&self) -> &Elliptic {
         &self.ec
     }
@@ -75,4 +75,32 @@ impl EllipticProvider for P256Elliptic {
 #[inline(always)]
 fn mask(x: u32) -> u32 {
     x.wrapping_sub(1).wrapping_shr(31).wrapping_sub(1)
+}
+
+
+#[cfg(test)]
+mod tests {
+    use std::rc::Rc;
+
+    use crate::sm2::ecc::CryptoFactory;
+    use crate::sm2::key::{HexKey, PrivateKey, PublicKey};
+
+    use super::*;
+
+    #[test]
+    fn encrypt() {
+        let elliptic = P256Elliptic::init();
+        let crypto = CryptoFactory::init(Rc::new(elliptic));
+
+        let prk = "6aea1ccf610488aaa7fddba3dd6d76d3bdfd50f957d847be3d453defb695f28e";
+        let puk = "04a8af64e38eea41c254df769b5b41fbaa2d77b226b301a2636d463c52b46c777230ad1714e686dd641b9e04596530b38f6a64215b0ed3b081f8641724c5443a6e";
+        let private_key = PrivateKey::decode(prk);
+        let public_key = PublicKey::decode(puk);
+
+        let encryptor = crypto.encryptor(public_key);
+        let decryptor = crypto.decryptor(private_key);
+
+        let cipher = encryptor.execute("hh");
+        let plain = decryptor.execute(&cipher);
+    }
 }
