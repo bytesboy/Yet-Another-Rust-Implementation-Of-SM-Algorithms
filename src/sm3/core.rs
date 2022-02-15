@@ -47,12 +47,16 @@ impl Crypto {
         }
     }
 
+    pub fn hash(&mut self) -> [u8; 32] {
+        self.pad().block().iterate().output()
+    }
+
     /// 假设消息m的长度为l 比特。首先将比特“1”添加到消息的末尾，再添加k 个“0”，
     /// k是满足l + 1 + k ≡ 448mod512 的最小的非负整数。然后再添加一个64位比特串，该比特串是长度l的二进 制表示。
     /// 填充后的消息m′的比特长度为512的倍数。
     /// 例如:对消息01100001 01100010 01100011，其长度l=24，经填充得到比特串:
     /// 01100001 01100010 01100011 1 {00 · · · 00}(423比特) {00 · · · 011000}(64比特，l的二进制表示)
-    pub fn pad(&mut self) -> &mut Self {
+    fn pad(&mut self) -> &mut Self {
         // 计算原始数据的长度
         let l = (self.data.len() << 3) as u64;
         // 将'10000000'添加到数据的末尾
@@ -75,7 +79,7 @@ impl Crypto {
 
 
     /// 分组： 将填充后的消息m′按512比特进行分组:m′ = B(0)B(1) · · · B(n−1), 其中n=(l+k+65)/512。
-    pub fn block(&mut self) -> &mut Self {
+    fn block(&mut self) -> &mut Self {
         let length = self.data.len();
         let mut c = 0;
         while c * 64 != length {
@@ -115,7 +119,7 @@ impl Crypto {
     ///         F←E
     ///         E ← P0(TT2)
     ///     V(i+1) ← ABCDEFGH⊕V(i)
-    pub fn iterate(&mut self) -> &mut Self {
+    fn iterate(&mut self) -> &mut Self {
         self.blocks.iter().for_each(|b| {
             // 扩展
             // 每个分组扩展生成132个字W0, W1, · · · , W67, W0′, W1′, · · · , W63′
@@ -213,7 +217,7 @@ impl Crypto {
     }
 
     /// 输出256比特的哈希值
-    pub fn hash(&self) -> String {
+    fn output(&self) -> [u8; 32] {
         // 大端模式：[u32; 8] -> [u8; 32]
         let mut hash: [u8; 32] = [0; 32];
         for (i, e) in self.registers.iter().enumerate() {
@@ -222,7 +226,7 @@ impl Crypto {
             hash[i * 4 + 2] = (*e >> 8) as u8;
             hash[i * 4 + 3] = *e as u8;
         }
-        hex::encode(hash)
+        hash
     }
 }
 
@@ -235,7 +239,7 @@ mod tests {
     fn main() {
         let plain = String::from("abc");
         let data = plain.as_bytes();
-        let hash = Crypto::new(data).pad().block().iterate().hash();
+        let hash = hex::encode(Crypto::new(data).hash());
         assert_eq!(hash, "66c7f0f462eeedd9d1f2d46bdc10e4e24167c4875cf2f7a2297da02b8f4ba8e0");
     }
 }
