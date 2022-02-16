@@ -27,19 +27,27 @@ impl PublicKey {
 
 impl HexKey for PublicKey {
     fn encode(&self) -> String {
-        let (x, y) = (self.0.to_bytes_be(), self.1.to_bytes_be());
-        if x.len() != 32 || y.len() != 32 {
-            panic!("The public key is error, x and y coordinates must be 32 bytes.")
-        }
         let key_bytes = {
+            let (x, y) = (self.0.to_bytes_be(), self.1.to_bytes_be());
+            let (xl, yl) = (x.len(), y.len());
             // key = 0x04 || x || y
             let mut key = vec![0u8; 65];
             key[0] = 0x04;
-            for (dst, src) in key[1..33].iter_mut().zip(x.iter()) {
-                *dst = *src;
+
+            if xl > 32 {
+                copy_slice(&mut key[1..33], &x[(xl - 32)..]);
+            } else if xl < 32 {
+                copy_slice(&mut key[(33 - xl)..33], &x);
+            } else {
+                copy_slice(&mut key[1..33], &x);
             }
-            for (dst, src) in key[33..].iter_mut().zip(y.iter()) {
-                *dst = *src;
+
+            if yl > 32 {
+                copy_slice(&mut key[33..], &y[(yl - 32)..]);
+            } else if yl < 32 {
+                copy_slice(&mut key[(65 - yl)..], &y);
+            } else {
+                copy_slice(&mut key[33..], &y);
             }
             key
         };
@@ -80,11 +88,22 @@ impl PrivateKey {
 
 impl HexKey for PrivateKey {
     fn encode(&self) -> String {
-        let key_bytes = self.0.to_bytes_be();
-        if key_bytes.len() != 32 {
-            panic!("The private key is error, it must be 32 bytes.")
-        }
-        hex::encode(key_bytes)
+        let key = {
+            let key_bytes = self.0.to_bytes_be();
+            let kl = key_bytes.len();
+            if kl > 32 {
+                let mut raw: Vec<u8> = vec![0; 32];
+                copy_slice(&mut raw, &key_bytes[(kl - 32)..]);
+                raw
+            } else if kl < 32 {
+                let mut raw: Vec<u8> = vec![0; 32];
+                copy_slice(&mut raw[(32 - kl)..], &key_bytes);
+                raw
+            } else {
+                key_bytes
+            }
+        };
+        hex::encode(key)
     }
 
     fn decode(key: &str) -> Self {
@@ -119,7 +138,7 @@ pub struct KeyGenerator {
 }
 
 impl KeyGenerator {
-    pub fn new(builder: Box<dyn EllipticBuilder>) -> Self {
+    pub fn init(builder: Box<dyn EllipticBuilder>) -> Self {
         KeyGenerator { builder }
     }
 
@@ -152,6 +171,12 @@ impl KeyGenerator {
     }
 }
 
+#[inline(always)]
+pub fn copy_slice(dst: &mut [u8], src: &[u8]) {
+    for (d, s) in dst.iter_mut().zip(src.iter()) {
+        *d = *s;
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -160,7 +185,7 @@ mod tests {
 
     #[test]
     fn main() {
-        let generator = KeyGenerator::new(Box::new(P256Elliptic::init()));
+        let generator = KeyGenerator::init(Box::new(P256Elliptic::init()));
         let pair = generator.gen_key_pair();
         println!("prk = {:?}", pair.private_key());
         println!("puk = {:?}", pair.public_key());
@@ -176,7 +201,7 @@ mod tests {
         let prk = BigUint::from_str_radix(prk, 10).unwrap();
 
         let private_key = PrivateKey(prk);
-        let generator = KeyGenerator::new(Box::new(P256Elliptic::init()));
+        let generator = KeyGenerator::init(Box::new(P256Elliptic::init()));
         let public_key = generator.gen_public_key(&private_key);
 
         assert_eq!(private_key.0.to_string(), "48358803002808206747871163666773640956067045543241775523137833706911222329998");

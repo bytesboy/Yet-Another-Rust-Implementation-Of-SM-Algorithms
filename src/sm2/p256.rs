@@ -113,4 +113,18 @@ mod tests {
         let plain = decryptor.execute(&cipher);
         assert_eq!(plain, text);
     }
+
+
+    // #[test]
+    // fn base_multiply() {
+    //     let p = "25860567653041730362372915392549320450425921427889571830952341986989258817583";
+    //     let x = "242063660207982615982024409983349356537039608617587537078830437950999775268";
+    //     let y = "40303997444697384409420254480222596343651841512105351309525683951137026260369";
+    //
+    //     let elliptic = P256Elliptic::init();
+    //     let d = BigUint::from_str_radix(p, 10).unwrap();
+    //     let p = elliptic.scalar_base_multiply(d);
+    //
+    //
+    // }
 }
