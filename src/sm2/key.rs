@@ -11,11 +11,6 @@ pub trait HexKey {
     fn decode(key: &str) -> Self;
 }
 
-// pub trait ZipHexKey {
-//     fn zip(&self) -> String;
-//     fn unzip(&self, key: String, elliptic: Box<dyn EllipticProvider>) -> Self;
-// }
-
 /// 公钥
 /// 非压缩公钥格式字节串长度为65字节，压缩格式长度为33字节;
 /// 非压缩格式公钥首字节为0x04。
@@ -72,45 +67,6 @@ impl HexKey for PublicKey {
     }
 }
 
-// impl ZipHexKey for PublicKey {
-//     fn zip(&self) -> String {
-//         let (x, y) = (self.0.to_bytes_be(), self.1.to_bytes_be());
-//         if x.len() != 32 || y.len() != 32 {
-//             panic!("The public key is error, x and y coordinates must be 32 bytes.")
-//         }
-//
-//         let key_bytes = {
-//             // key = 0x02 or 0x03 || x
-//             let mut key = vec![0u8; 33];
-//             if BigUint::zero() == self.1.clone().bitand(BigUint::from(1u8)) {
-//                 key[0] = 0x02;
-//             } else {
-//                 key[1] = 0x03;
-//             }
-//             for (dst, src) in key[1..].iter_mut().zip(x.iter()) {
-//                 *dst = *src;
-//             }
-//             key
-//         };
-//
-//         hex::encode(key_bytes)
-//     }
-//
-//     fn unzip(&self, key: String, elliptic: Box<dyn EllipticProvider>) -> Self {
-//         if key.len() != 66 {
-//             panic!("The compressed public key's length must be 66.")
-//         }
-//
-//         if !(key.starts_with("02") && key.starts_with("03")) {
-//             panic!("The compressed public key is invalid.")
-//         }
-//
-//         let x = match hex::decode(key.split_at(2).1) {
-//             Ok(data) => BigUint::from_bytes_be(data.as_slice()),
-//             Err(_) => panic!("The public key must be composed of hex chars.")
-//         };
-//     }
-// }
 
 /// 私钥 32bytes
 #[derive(Clone, Debug)]
