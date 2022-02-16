@@ -24,6 +24,12 @@ pub trait HexKey {
 #[derive(Clone, Debug)]
 pub struct PublicKey(BigUint, BigUint);
 
+impl PublicKey {
+    pub fn value(&self) -> (BigUint, BigUint) {
+        (self.0.clone(), self.1.clone())
+    }
+}
+
 impl HexKey for PublicKey {
     fn encode(&self) -> String {
         let (x, y) = (self.0.to_bytes_be(), self.1.to_bytes_be());
@@ -109,6 +115,12 @@ impl HexKey for PublicKey {
 /// 私钥 32bytes
 #[derive(Clone, Debug)]
 pub struct PrivateKey(BigUint);
+
+impl PrivateKey {
+    pub fn value(&self) -> BigUint {
+        self.0.clone()
+    }
+}
 
 impl HexKey for PrivateKey {
     fn encode(&self) -> String {

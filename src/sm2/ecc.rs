@@ -1,12 +1,11 @@
-use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::rc::Rc;
-use std::thread::Builder;
 
 use num_bigint::BigUint;
 use num_integer::Integer;
 
 use crate::sm2::key::{PrivateKey, PublicKey};
+use crate::sm3;
 
 pub trait EllipticBuilder {
     fn blueprint(&self) -> &Elliptic;
@@ -47,50 +46,28 @@ impl Elliptic {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(Debug, Copy, Clone)]
 pub enum Mode {
     C1C2C3,
     C1C3C2,
 }
 
-
-pub struct CryptoFactory {
+pub struct Crypto {
     mode: Mode,
     builder: Rc<dyn EllipticBuilder>,
 }
 
-impl CryptoFactory {
-    pub fn init(builder: Rc<dyn EllipticBuilder>) -> Self {
-        CryptoFactory { mode: Mode::C1C2C3, builder }
+impl Crypto {
+    pub fn init(mode: Mode, builder: Rc<dyn EllipticBuilder>) -> Self {
+        Crypto { mode, builder }
     }
 
-    pub fn mode(&mut self, mode: Mode) -> &mut Self {
-        if self.mode != mode {
-            self.mode = mode;
-        }
-        self
+    pub fn encryptor(&self, key: PublicKey) -> Encryptor {
+        Encryptor { key, mode: self.mode, builder: self.builder.clone() }
     }
 
-    pub fn encryptor(&self, key: PublicKey) -> Box<dyn Encryption> {
-        match self.mode {
-            Mode::C1C2C3 => {
-                Box::new(c1c2c3::Encryptor::new(key, self.builder.clone()))
-            }
-            Mode::C1C3C2 => {
-                Box::new(c1c3c2::Encryptor::new(key, self.builder.clone()))
-            }
-        }
-    }
-
-    pub fn decryptor(&self, key: PrivateKey) -> Box<dyn Decryption> {
-        match self.mode {
-            Mode::C1C2C3 => {
-                Box::new(c1c2c3::Decryptor::new(key, self.builder.clone()))
-            }
-            Mode::C1C3C2 => {
-                Box::new(c1c3c2::Decryptor::new(key, self.builder.clone()))
-            }
-        }
+    pub fn decryptor(&self, key: PrivateKey) -> Decryptor {
+        Decryptor { key, mode: self.mode, builder: self.builder.clone() }
     }
 }
 
@@ -103,89 +80,167 @@ pub trait Decryption {
     fn execute(&self, cipher: &str) -> String;
 }
 
+pub struct Encryptor {
+    mode: Mode,
+    key: PublicKey,
+    builder: Rc<dyn EllipticBuilder>,
+}
 
-mod c1c2c3 {
-    use std::rc::Rc;
-    use crate::sm2::ecc::{Decryption, EllipticBuilder, Encryption};
-    use crate::sm2::key::{PrivateKey, PublicKey};
 
-    pub struct Encryptor {
-        key: PublicKey,
-        builder: Rc<dyn EllipticBuilder>,
+impl Encryption for Encryptor {
+    fn execute(&self, plain: &str) -> String {
+        let data = plain.as_bytes();
+        let key = self.key.value();
+        let cipher = loop {
+            let k = self.builder.blueprint().random();
+            // C1: [k]G
+            let c1 = {
+                let (x1, y1) = self.builder.scalar_base_multiply(k.clone());
+                [vec![0x04], x1.to_bytes_be(), y1.to_bytes_be()].concat()
+            };
+
+            let (x2, y2) = self.builder.scalar_multiply(key.0.clone(), key.1.clone(), k.clone());
+            let temp = [x2.to_bytes_be(), y2.to_bytes_be()].concat();
+            let t = kdf(temp, data.len());
+
+            if is_all_zero(t.clone()) {
+                continue;
+            }
+
+            // C2: M ^ KDF(x2 ‖ γ2, len(M))
+            let mut c2 = vec![];
+            for i in 0..data.len() {
+                c2.push(data[i] ^ t.clone()[i]);
+            }
+
+            // C3: hash(x2 ‖ M ‖ γ2)
+            let c3 = {
+                let data = [x2.to_bytes_be(), data.to_vec(), y2.to_bytes_be()].concat();
+                sm3::hash(data.as_slice()).to_vec()
+            };
+
+            break match self.mode {
+                Mode::C1C3C2 => [c1, c3, c2].concat(),
+                Mode::C1C2C3 => [c1, c2, c3].concat()
+            };
+        };
+
+        hex::encode(cipher)
     }
+}
 
-    impl Encryptor {
-        pub(crate) fn new(key: PublicKey, builder: Rc<dyn EllipticBuilder>) -> Self {
-            Encryptor { key, builder }
+pub struct Decryptor {
+    mode: Mode,
+    key: PrivateKey,
+    builder: Rc<dyn EllipticBuilder>,
+}
+
+impl Decryption for Decryptor {
+    fn execute(&self, cipher: &str) -> String {
+        let data = {
+            if !cipher.starts_with("04") {
+                panic!("The cipher data is invalid.")
+            }
+            match hex::decode(cipher) {
+                Ok(data) => data[1..].to_vec(),
+                Err(_) => panic!("The cipher data must be composed of hex chars.")
+            }
+        };
+        let (c1, c2, c3) = {
+            let len = data.len();
+            match self.mode {
+                Mode::C1C3C2 => {
+                    (data.clone()[..64].to_vec(), data.clone()[96..].to_vec(), data.clone()[64..96].to_vec())
+                }
+                Mode::C1C2C3 => {
+                    (data.clone()[..64].to_vec(), data.clone()[64..len - 32].to_vec(), data.clone()[len - 32..].to_vec())
+                }
+            }
+        };
+
+
+        let (x2, y2) = {
+            let (x1, y1) = (
+                BigUint::from_bytes_be(&c1.clone()[..32]),
+                BigUint::from_bytes_be(&c1.clone()[32..])
+            );
+            self.builder.scalar_multiply(x1, y1, self.key.value())
+        };
+
+
+        let plain = {
+            let temp = [x2.to_bytes_be(), y2.to_bytes_be()].concat();
+            let t = kdf(temp, c2.len());
+
+            if is_all_zero(t.clone()) {
+                panic!("The cipher data is invalid.")
+            }
+
+            let mut plain = vec![];
+            for i in 0..c2.len() {
+                plain.push(c2.clone()[i] ^ t.clone()[i]);
+            }
+            plain
+        };
+
+        let hash = {
+            let temp = [x2.to_bytes_be(), plain.clone(), y2.to_bytes_be()].concat();
+            sm3::hash(&temp).to_vec()
+        };
+
+        if hash != c3 {
+            panic!("The cipher data hash validation failed.");
         }
-    }
 
-    impl Encryption for Encryptor {
-        fn execute(&self, plain: &str) -> String {
-            println!("plain = {:?}", plain);
-            String::from(plain)
-        }
-    }
-
-
-    pub struct Decryptor {
-        key: PrivateKey,
-        builder: Rc<dyn EllipticBuilder>,
-    }
-
-    impl Decryptor {
-        pub(crate) fn new(key: PrivateKey, builder: Rc<dyn EllipticBuilder>) -> Self {
-            Decryptor { key, builder }
-        }
-    }
-
-    impl Decryption for Decryptor {
-        fn execute(&self, cipher: &str) -> String {
-            println!("cipher = {:?}", cipher);
-            String::from(cipher)
-        }
+        String::from_utf8_lossy(plain.as_slice()).to_string()
     }
 }
 
 
-mod c1c3c2 {
-    use std::rc::Rc;
-    use crate::sm2::ecc::{Decryption, EllipticBuilder, Encryption};
-    use crate::sm2::key::{PrivateKey, PublicKey};
+/// 秘钥派生函数
+#[inline(always)]
+fn kdf(data: Vec<u8>, len: usize) -> Vec<u8> {
+    let mut counter: usize = 0x00000001;
+    let mut result: Vec<u8> = vec![];
+    let k = data.len() + 31 / 32;
+    for i in 0..k {
+        let temp = [data.as_slice(), to_bytes(counter).as_slice()].concat();
+        let hash = sm3::hash(&temp);
 
-    pub struct Encryptor {
-        key: PublicKey,
-        builder: Rc<dyn EllipticBuilder>,
-    }
-
-    impl Encryptor {
-        pub(crate) fn new(key: PublicKey, builder: Rc<dyn EllipticBuilder>) -> Self {
-            Encryptor { key, builder }
+        if (i + 1) == k && len % 32 != 0 {
+            result = [result, hash[..(len % 32)].to_vec()].concat();
+        } else {
+            result = [result, hash.to_vec()].concat();
         }
+        counter += 1;
     }
-
-    impl Encryption for Encryptor {
-        fn execute(&self, plain: &str) -> String {
-            todo!()
-        }
-    }
-
-    pub struct Decryptor {
-        key: PrivateKey,
-        builder: Rc<dyn EllipticBuilder>,
-    }
-
-    impl Decryptor {
-        pub(crate) fn new(key: PrivateKey, builder: Rc<dyn EllipticBuilder>) -> Self {
-            Decryptor { key, builder }
-        }
-    }
-
-    impl Decryption for Decryptor {
-        fn execute(&self, cipher: &str) -> String {
-            todo!()
-        }
-    }
+    result
 }
+
+#[inline(always)]
+fn is_all_zero(data: Vec<u8>) -> bool {
+    let mut flag = true;
+    for i in 0..data.len() {
+        if data[i] != 0 {
+            flag = false;
+            break;
+        }
+    }
+    flag
+}
+
+
+#[inline(always)]
+fn to_bytes(x: usize) -> [u8; 4] {
+    let mut buf: [u8; 4] = [0; 4];
+
+    buf[0] = (x >> 24) as u8;
+    buf[1] = (x >> 16) as u8;
+    buf[2] = (x >> 8) as u8;
+    buf[3] = x as u8;
+
+    buf
+}
+
 
 

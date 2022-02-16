@@ -82,25 +82,35 @@ fn mask(x: u32) -> u32 {
 mod tests {
     use std::rc::Rc;
 
-    use crate::sm2::ecc::CryptoFactory;
+    use crate::sm2::ecc::{Crypto, Decryption, Encryption, Mode};
     use crate::sm2::key::{HexKey, PrivateKey, PublicKey};
 
     use super::*;
 
     #[test]
-    fn encrypt() {
+    fn main() {
         let elliptic = P256Elliptic::init();
-        let crypto = CryptoFactory::init(Rc::new(elliptic));
+
 
         let prk = "6aea1ccf610488aaa7fddba3dd6d76d3bdfd50f957d847be3d453defb695f28e";
         let puk = "04a8af64e38eea41c254df769b5b41fbaa2d77b226b301a2636d463c52b46c777230ad1714e686dd641b9e04596530b38f6a64215b0ed3b081f8641724c5443a6e";
         let private_key = PrivateKey::decode(prk);
         let public_key = PublicKey::decode(puk);
 
-        let encryptor = crypto.encryptor(public_key);
-        let decryptor = crypto.decryptor(private_key);
-
-        let cipher = encryptor.execute("hh");
+        let crypto = Crypto::init(Mode::C1C3C2, Rc::new(elliptic.clone()));
+        let encryptor = crypto.encryptor(public_key.clone());
+        let decryptor = crypto.decryptor(private_key.clone());
+        let text = "圣光会抛弃你的，英雄，就像抛弃我那样。——巫妖王";
+        let cipher = encryptor.execute(text);
         let plain = decryptor.execute(&cipher);
+        assert_eq!(plain, text);
+
+        let crypto = Crypto::init(Mode::C1C2C3, Rc::new(elliptic.clone()));
+        let encryptor = crypto.encryptor(public_key.clone());
+        let decryptor = crypto.decryptor(private_key.clone());
+        let text = "兽人永不为奴，我们终将成王。——加尔鲁什·地狱咆哮";
+        let cipher = encryptor.execute(text);
+        let plain = decryptor.execute(&cipher);
+        assert_eq!(plain, text);
     }
 }
