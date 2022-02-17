@@ -5,7 +5,16 @@ pub mod sm4;
 
 #[cfg(test)]
 mod tests {
-    use crate::{sm3, sm4};
+    use crate::{sm2, sm3, sm4};
+
+
+    #[test]
+    fn sm2_keypair() {
+        for i in 0..10 {
+            let (prk, puk) = sm2::generate_key();
+            println!("{:?}: ({:?}, {:?})", i, prk, puk);
+        }
+    }
 
     #[test]
     fn sm3_hash() {
