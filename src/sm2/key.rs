@@ -4,7 +4,7 @@ use num_bigint::BigUint;
 use num_integer::Integer;
 use num_traits::{FromPrimitive, Num};
 
-use crate::sm2::ecc::EllipticBuilder;
+use crate::sm2::ecc::{EllipticBuilder, Verifier};
 
 pub trait HexKey {
     fn encode(&self) -> String;
@@ -27,31 +27,12 @@ impl PublicKey {
 
 impl HexKey for PublicKey {
     fn encode(&self) -> String {
-        let key_bytes = {
-            let (x, y) = (self.0.to_bytes_be(), self.1.to_bytes_be());
-            let (xl, yl) = (x.len(), y.len());
-            // key = 0x04 || x || y
-            let mut key = vec![0u8; 65];
-            key[0] = 0x04;
-
-            if xl > 32 {
-                copy_slice(&mut key[1..33], &x[(xl - 32)..]);
-            } else if xl < 32 {
-                copy_slice(&mut key[(33 - xl)..33], &x);
-            } else {
-                copy_slice(&mut key[1..33], &x);
-            }
-
-            if yl > 32 {
-                copy_slice(&mut key[33..], &y[(yl - 32)..]);
-            } else if yl < 32 {
-                copy_slice(&mut key[(65 - yl)..], &y);
-            } else {
-                copy_slice(&mut key[33..], &y);
-            }
-            key
+        let key = {
+            let x = self.0.to_bytes_be();
+            let y = self.1.to_bytes_be();
+            [vec![0x04], to_32_bytes(x).to_vec(), to_32_bytes(y).to_vec()].concat()
         };
-        hex::encode(key_bytes)
+        hex::encode(key)
     }
 
     fn decode(key: &str) -> Self {
@@ -88,22 +69,7 @@ impl PrivateKey {
 
 impl HexKey for PrivateKey {
     fn encode(&self) -> String {
-        let key = {
-            let key_bytes = self.0.to_bytes_be();
-            let kl = key_bytes.len();
-            if kl > 32 {
-                let mut raw: Vec<u8> = vec![0; 32];
-                copy_slice(&mut raw, &key_bytes[(kl - 32)..]);
-                raw
-            } else if kl < 32 {
-                let mut raw: Vec<u8> = vec![0; 32];
-                copy_slice(&mut raw[(32 - kl)..], &key_bytes);
-                raw
-            } else {
-                key_bytes
-            }
-        };
-        hex::encode(key)
+        hex::encode(to_32_bytes(self.0.to_bytes_be()))
     }
 
     fn decode(key: &str) -> Self {
@@ -124,10 +90,13 @@ impl HexKey for PrivateKey {
 pub struct KeyPair(PrivateKey, PublicKey);
 
 impl KeyPair {
-    pub fn private_key(&self) -> &PrivateKey {
+    pub fn new(prk: PrivateKey, puk: PublicKey) -> Self {
+        KeyPair(prk, puk)
+    }
+    pub fn prk(&self) -> &PrivateKey {
         &self.0
     }
-    pub fn public_key(&self) -> &PublicKey {
+    pub fn puk(&self) -> &PublicKey {
         &self.1
     }
 }
@@ -149,24 +118,20 @@ impl KeyGenerator {
     }
 
     /// 生成私钥
+    ///
+    /// d ∈ \[1, n − 2]
     fn gen_private_key(&self) -> PrivateKey {
-        // private key: 32 bytes
-        let elliptic = self.builder.blueprint();
-        // subgroup order
-        let n = &elliptic.n;
-        let k = elliptic.random();
-        // n-2
-        let n = BigUint::sub((*n).clone(), BigUint::from_u64(2).unwrap());
-        // k % n  ∈ [0, n-1]  => k % (n-2) + 1  ∈ [1, n-2] => key ∈ [1, n-1)
-        let key = k.mod_floor(&n).add(BigUint::from_u64(1).unwrap());
-        PrivateKey(key)
+        let e = self.builder.blueprint();
+        let from = BigUint::from(1u8);
+        let to = e.n.clone().sub(BigUint::from(2u8));
+        PrivateKey(e.random(from, to))
     }
 
     /// 生成公钥
     ///
     /// P = (x,y) = dG, G为基点，d为私钥
     fn gen_public_key(&self, private_key: &PrivateKey) -> PublicKey {
-        let key = self.builder.scalar_base_multiply(private_key.0.clone());
+        let key = self.builder.scalar_base_multiply(private_key.value());
         PublicKey(key.0, key.1)
     }
 }
@@ -178,6 +143,19 @@ pub fn copy_slice(dst: &mut [u8], src: &[u8]) {
     }
 }
 
+#[inline(always)]
+pub fn to_32_bytes(data: Vec<u8>) -> [u8; 32] {
+    let mut result = [0u8; 32];
+    if data.len() > 32 {
+        copy_slice(&mut result, &data[(data.len() - 32)..]);
+    } else if data.len() < 32 {
+        copy_slice(&mut result[(32 - data.len())..], &data);
+    } else {
+        copy_slice(&mut result, &data);
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use crate::sm2::p256::P256Elliptic;
@@ -187,8 +165,8 @@ mod tests {
     fn main() {
         let generator = KeyGenerator::init(Box::new(P256Elliptic::init()));
         let pair = generator.gen_key_pair();
-        println!("prk = {:?}", pair.private_key());
-        println!("puk = {:?}", pair.public_key());
+        println!("prk = {:?}", pair.prk());
+        println!("puk = {:?}", pair.puk());
     }
 
     #[test]
