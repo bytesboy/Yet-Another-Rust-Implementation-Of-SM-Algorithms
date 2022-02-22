@@ -1,3 +1,4 @@
+use std::rc::Rc;
 use crate::sm2::ecc::{Crypto, Decryption, Encryption, Signature};
 use crate::sm2::key::{HexKey, KeyGenerator, KeyPair, PrivateKey, PublicKey};
 use crate::sm2::p256::P256Elliptic;
@@ -21,6 +22,16 @@ pub fn encrypt(public_key: &str, plain: &str) -> String {
 
 pub fn decrypt(private_key: &str, cipher: &str) -> String {
     let crypto = Crypto::default();
+    crypto.decryptor(PrivateKey::decode(private_key)).execute(cipher)
+}
+
+pub fn encrypt_c1c2c3(public_key: &str, plain: &str) -> String {
+    let crypto = Crypto::c1c2c3(Rc::new(P256Elliptic::init()));
+    crypto.encryptor(PublicKey::decode(public_key)).execute(plain)
+}
+
+pub fn decrypt_c1c2c3(private_key: &str, cipher: &str) -> String {
+    let crypto = Crypto::c1c2c3(Rc::new(P256Elliptic::init()));
     crypto.decryptor(PrivateKey::decode(private_key)).execute(cipher)
 }
 
