@@ -1,10 +1,9 @@
-use std::ops::{Add, Sub};
+use std::ops::Sub;
 
 use num_bigint::BigUint;
-use num_integer::Integer;
-use num_traits::{FromPrimitive, Num, One};
+use num_traits::{Num, One};
 
-use crate::sm2::ecc::{EllipticBuilder, Verifier};
+use crate::sm2::ecc::EllipticBuilder;
 
 pub trait HexKey {
     fn encode(&self) -> String;
@@ -159,6 +158,7 @@ pub fn to_32_bytes(data: Vec<u8>) -> [u8; 32] {
 #[cfg(test)]
 mod tests {
     use crate::sm2::p256::P256Elliptic;
+
     use super::*;
 
     #[test]

@@ -1,7 +1,5 @@
-use std::rc::Rc;
-
-use crate::sm2::ecc::{Crypto, Decryption, Encryption};
-use crate::sm2::key::{HexKey, KeyGenerator, PrivateKey, PublicKey};
+use crate::sm2::ecc::{Crypto, Decryption, Encryption, Signature};
+use crate::sm2::key::{HexKey, KeyGenerator, KeyPair, PrivateKey, PublicKey};
 use crate::sm2::p256::P256Elliptic;
 
 mod key;
@@ -16,12 +14,24 @@ pub fn generate_key() -> (String, String) {
     (pair.prk().encode(), pair.puk().encode())
 }
 
-pub fn encrypt(key: &str, plain: &str) -> String {
+pub fn encrypt(public_key: &str, plain: &str) -> String {
     let crypto = Crypto::default();
-    crypto.encryptor(PublicKey::decode(key)).execute(plain)
+    crypto.encryptor(PublicKey::decode(public_key)).execute(plain)
 }
 
-pub fn decrypt(key: &str, cipher: &str) -> String {
+pub fn decrypt(private_key: &str, cipher: &str) -> String {
     let crypto = Crypto::default();
-    crypto.decryptor(PrivateKey::decode(key)).execute(cipher)
+    crypto.decryptor(PrivateKey::decode(private_key)).execute(cipher)
+}
+
+pub fn sign(private_key: &str, public_key: &str, plain: &str) -> String {
+    let crypto = Crypto::default();
+    let keypair = KeyPair::new(PrivateKey::decode(private_key), PublicKey::decode(public_key));
+    hex::encode(crypto.signer(keypair).sign(&plain).encode())
+}
+
+pub fn verify(public_key: &str, plain: &str, signature: &str) -> bool {
+    let crypto = Crypto::default();
+    let s = Signature::decode(hex::decode(signature).unwrap().as_slice());
+    crypto.verifier(PublicKey::decode(public_key)).verify(plain, &s)
 }

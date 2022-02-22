@@ -1,9 +1,9 @@
 use std::cmp::Ordering;
 use std::ops::{BitAnd, Neg, Shr};
 
-use num_bigint::{BigUint, Sign, ToBigInt};
+use num_bigint::{BigInt, BigUint, Sign, ToBigInt};
 use num_integer::Integer;
-use num_traits::ToPrimitive;
+use num_traits::{One, ToPrimitive};
 
 use crate::sm2::p256::{mask, P256Elliptic};
 use crate::sm2::p256::params::{BASE_TABLE, P256FACTOR};
@@ -52,6 +52,14 @@ impl P256AffinePoint {
             }
         }
         P256AffinePoint(Payload::new(x), Payload::new(y))
+    }
+
+    pub(crate) fn to_jacobian(&self) -> P256JacobianPoint {
+        P256JacobianPoint(
+            self.0.clone(),
+            self.1.clone(),
+            PayloadHelper::transform(&BigInt::one()),
+        )
     }
 }
 
@@ -221,7 +229,7 @@ impl Multiplication for P256BasePoint {
 
 /// Jacobian coordinates: (x, y, z)  y^2 = x^3 + axz^4 + bz^6
 #[derive(Copy, Clone, Debug)]
-struct P256JacobianPoint(Payload, Payload, Payload);
+pub(crate) struct P256JacobianPoint(Payload, Payload, Payload);
 
 
 impl P256JacobianPoint {
@@ -255,7 +263,7 @@ impl P256JacobianPoint {
     /// See https://www.hyperelliptic.org/EFD/g1p/auto-shortw-jacobian-0.html#addition-add-2007-bl
     ///
     /// Note that this function does not handle P+P, infinity+P nor P+infinity correctly.
-    fn add_affine(&self, affine: &P256AffinePoint) -> Self {
+    pub(crate) fn add_affine(&self, affine: &P256AffinePoint) -> Self {
         let (x1, y1, z1) = (&self.0, &self.1, &self.2);
         let (x2, y2) = (&affine.0, &affine.1);
 
@@ -307,7 +315,7 @@ impl P256JacobianPoint {
 
     /// Jacobian coordinates: (x, y, z)  y^2 = x^3 + axz^4 + bz^6
     /// Affine coordinates: (X = x/z^2, Y = y/z^3)  Y^2 = X^3 + aX +b
-    fn to_affine_point(&self) -> P256AffinePoint {
+    pub(crate) fn to_affine_point(&self) -> P256AffinePoint {
         let elliptic = P256Elliptic::init();
         let z = PayloadHelper::restore(&self.2);
         let p = elliptic.ec.p.to_bigint().unwrap();

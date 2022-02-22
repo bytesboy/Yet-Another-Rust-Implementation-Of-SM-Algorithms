@@ -48,6 +48,20 @@ impl EllipticBuilder for P256Elliptic {
         &self.ec
     }
 
+    fn point_add(&self, x1: BigUint, y1: BigUint, x2: BigUint, y2: BigUint) -> (BigUint, BigUint) {
+        let p1 = P256AffinePoint::new(
+            PayloadHelper::transform(&x1.to_bigint().unwrap()),
+            PayloadHelper::transform(&y1.to_bigint().unwrap()),
+        ).to_jacobian();
+
+        let p2 = P256AffinePoint::new(
+            PayloadHelper::transform(&x2.to_bigint().unwrap()),
+            PayloadHelper::transform(&y2.to_bigint().unwrap()),
+        );
+
+        p1.add_affine(&p2).to_affine_point().restore()
+    }
+
     fn scalar_multiply(&self, x: BigUint, y: BigUint, scalar: BigUint) -> (BigUint, BigUint) {
         let elliptic = self.blueprint();
         let point = P256AffinePoint::new(
@@ -127,12 +141,15 @@ mod tests {
 
         let crypto = Crypto::c1c3c2(Rc::new(elliptic.clone()));
 
-        let signer = crypto.signer(keypair);
-        let s = signer.sign("圣光会抛弃你的，英雄，就像抛弃我那样。——巫妖王");
 
-        let ans1 = hex::encode(s.encode());
-        println!("ans1 = {:?}", ans1);
-        let signature = Signature::decode(hex::decode(ans1).unwrap().as_slice());
-        println!("sign = {:?}", signature);
+        let plain = "圣光会抛弃你的，英雄，就像抛弃我那样。——巫妖王";
+        let signer = crypto.signer(keypair);
+        let verifier = crypto.verifier(puk);
+
+        let ans1 = hex::encode(signer.sign(plain).encode());
+        let s = Signature::decode(hex::decode(ans1).unwrap().as_slice());
+
+        let flag = verifier.verify(plain, &s);
+        assert_eq!(flag, true);
     }
 }

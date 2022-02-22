@@ -17,6 +17,32 @@ mod tests {
     }
 
     #[test]
+    fn sm2_encrypt_decrypt() {
+        let text = "圣光会抛弃你的，英雄，就像抛弃我那样。——巫妖王";
+
+        let prk = "6aea1ccf610488aaa7fddba3dd6d76d3bdfd50f957d847be3d453defb695f28e";
+        let puk = "04a8af64e38eea41c254df769b5b41fbaa2d77b226b301a2636d463c52b46c777230ad1714e686dd641b9e04596530b38f6a64215b0ed3b081f8641724c5443a6e";
+
+        let cipher = sm2::encrypt(puk, text);
+        let plain = sm2::decrypt(prk, &cipher);
+
+        assert_eq!(plain, text);
+    }
+
+    #[test]
+    fn sm2_sign_verify() {
+        let text = "圣光会抛弃你的，英雄，就像抛弃我那样。——巫妖王";
+
+        let prk = "6aea1ccf610488aaa7fddba3dd6d76d3bdfd50f957d847be3d453defb695f28e";
+        let puk = "04a8af64e38eea41c254df769b5b41fbaa2d77b226b301a2636d463c52b46c777230ad1714e686dd641b9e04596530b38f6a64215b0ed3b081f8641724c5443a6e";
+
+        let s = sm2::sign(prk, puk, text);
+        let f = sm2::verify(puk, text, &s);
+
+        assert_eq!(f, true);
+    }
+
+    #[test]
     fn sm3_hash() {
         let hash = sm3::digest("abc");
         assert_eq!(hash, "66c7f0f462eeedd9d1f2d46bdc10e4e24167c4875cf2f7a2297da02b8f4ba8e0");

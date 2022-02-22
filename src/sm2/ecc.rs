@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use num_bigint::{BigInt, BigUint, ToBigInt};
 use num_integer::Integer;
-use num_traits::{FromPrimitive, Zero};
+use num_traits::{One, Zero};
 
 use crate::sm2::key::{KeyPair, PrivateKey, PublicKey, to_32_bytes};
 use crate::sm2::p256::P256Elliptic;
@@ -17,6 +17,9 @@ const UID: [u8; 16] = [
 
 pub trait EllipticBuilder {
     fn blueprint(&self) -> &Elliptic;
+
+    /// 点加
+    fn point_add(&self, x1: BigUint, y1: BigUint, x2: BigUint, y2: BigUint) -> (BigUint, BigUint);
     /// 标量乘法
     fn scalar_multiply(&self, x: BigUint, y: BigUint, scalar: BigUint) -> (BigUint, BigUint);
     /// 基点标量乘法
@@ -56,7 +59,7 @@ impl Elliptic {
         };
 
         // temp = to - from + 1
-        let temp = temp.add(BigUint::from(1u8));
+        let temp = temp.add(BigUint::one());
         // k % temp  ∈ [0, temp - 1] = [0, to - from]  =>  k % temp + from ∈ [from, to]
         k.mod_floor(&temp).add(&from)
     }
@@ -104,11 +107,37 @@ impl Crypto {
     }
 
     pub fn signer(&self, keypair: KeyPair) -> Signer {
-        Signer { uid: UID.to_vec(), keypair, builder: self.builder.clone() }
+        let za = self.digest(keypair.puk().clone());
+        Signer { hash: za, keypair, builder: self.builder.clone() }
     }
 
     pub fn verifier(&self, key: PublicKey) -> Verifier {
-        Verifier { key, builder: self.builder.clone() }
+        let za = self.digest(key.clone());
+        Verifier { hash: za, key, builder: self.builder.clone() }
+    }
+
+    /// ZA=H256(ENTLA ∥ IDA ∥ a ∥ b ∥ xG ∥ yG ∥xA ∥yA)
+    fn digest(&self, puk: PublicKey) -> Vec<u8> {
+        let ent = {
+            if UID.len() >= 8192 {
+                panic!("UID is too large.");
+            }
+            let r = UID.len() * 8;
+            [((r >> 8) & 0xFF) as u8, (r & 0xFF) as u8].to_vec()
+        };
+
+        let id = UID.to_vec();
+        let e = self.builder.blueprint();
+        let (a, b) = (e.a.to_bytes_be(), e.a.to_bytes_be());
+        let (gx, gy) = (e.gx.to_bytes_be(), e.gy.to_bytes_be());
+
+        let (px, py) = {
+            let key = puk.value();
+            let (x, y) = (key.0.to_bytes_be(), key.1.to_bytes_be());
+            (to_32_bytes(x).to_vec(), to_32_bytes(y).to_vec())
+        };
+
+        sm3::hash([ent, id, a, b, gx, gy, px, py].concat().as_slice()).to_vec()
     }
 }
 
@@ -127,12 +156,13 @@ pub struct Encryptor {
 }
 
 impl Encryption for Encryptor {
+    /// 加密
     fn execute(&self, plain: &str) -> String {
         let data = plain.as_bytes();
         let cipher = loop {
             let k = {
                 let elliptic = self.builder.blueprint();
-                let from = BigUint::from(1u32);
+                let from = BigUint::one();
                 elliptic.random(from.clone(), elliptic.n.clone().sub(&from.clone()))
             };
 
@@ -184,6 +214,7 @@ pub struct Decryptor {
 }
 
 impl Decryption for Decryptor {
+    /// 解密
     fn execute(&self, cipher: &str) -> String {
         let data = {
             if !cipher.starts_with("04") {
@@ -308,12 +339,12 @@ impl Display for Signature {
 }
 
 impl Signature {
-    pub fn new(r: BigUint, s: BigUint) -> Self {
+    pub(crate) fn new(r: BigUint, s: BigUint) -> Self {
         Signature { r, s }
     }
 
     /// Encodes the signature to DER-encoded ASN.1 data.
-    pub fn encode(&self) -> Vec<u8> {
+    pub(crate) fn encode(&self) -> Vec<u8> {
         let data = yasna::construct_der(|writer| {
             writer.write_sequence(|writer| {
                 writer.next().write_biguint(&self.r);
@@ -324,7 +355,7 @@ impl Signature {
     }
 
     /// Decodes the DER-encoded ASN.1 data to Signature.
-    pub fn decode(signature: &[u8]) -> Self {
+    pub(crate) fn decode(signature: &[u8]) -> Self {
         let (r, s) = yasna::parse_der(signature, |reader| {
             reader.read_sequence(|reader| {
                 let r = reader.next().read_biguint()?;
@@ -338,38 +369,15 @@ impl Signature {
 }
 
 pub struct Signer {
-    uid: Vec<u8>,
+    hash: Vec<u8>,
     keypair: KeyPair,
     builder: Rc<dyn EllipticBuilder>,
 }
 
 impl Signer {
-    /// ZA=H256(ENTLA ∥ IDA ∥ a ∥ b ∥ xG ∥ yG ∥xA ∥yA)
-    fn digest(&self) -> Vec<u8> {
-        let ent = {
-            if self.uid.len() >= 8192 {
-                panic!("UID is too large.");
-            }
-            let r = self.uid.len() * 8;
-            [((r >> 8) & 0xFF) as u8, (r & 0xFF) as u8].to_vec()
-        };
-
-        let id = self.uid.clone();
-        let e = self.builder.blueprint();
-        let (a, b) = (e.a.to_bytes_be(), e.a.to_bytes_be());
-        let (gx, gy) = (e.gx.to_bytes_be(), e.gy.to_bytes_be());
-
-        let (px, py) = {
-            let key = self.keypair.puk().value();
-            let (x, y) = (key.0.to_bytes_be(), key.1.to_bytes_be());
-            (to_32_bytes(x).to_vec(), to_32_bytes(y).to_vec())
-        };
-
-        sm3::hash([ent, id, a, b, gx, gy, px, py].concat().as_slice()).to_vec()
-    }
-
-    pub fn sign(&self, plain: &str) -> Signature {
-        let m = [self.digest(), plain.as_bytes().to_vec()].concat();
+    /// 签名
+    pub(crate) fn sign(&self, plain: &str) -> Signature {
+        let m = [self.hash.clone(), plain.as_bytes().to_vec()].concat();
         let e = sm3::hash(m.as_slice());
         let elliptic = self.builder.blueprint();
 
@@ -377,7 +385,7 @@ impl Signer {
 
         let (r, s) = loop {
             let k = {
-                let from = BigUint::from(1u8);
+                let from = BigUint::one();
                 elliptic.random(from.clone(), elliptic.n.clone().sub(&from.clone()))
             };
 
@@ -396,7 +404,7 @@ impl Signer {
                 let temp = d.clone().mul(&r.to_bigint().unwrap());
                 // a = k - rd
                 let a = k.to_bigint().unwrap().sub(&temp);
-                let temp = d.clone().add(BigInt::from(1i32));
+                let temp = d.clone().add(BigInt::one());
                 // 1 / (1+d)
                 let b = temp.extended_gcd(&n).x.mod_floor(&n);
                 a.mul(b).mod_floor(&n).to_biguint().unwrap()
@@ -415,12 +423,63 @@ impl Signer {
 
 
 pub struct Verifier {
+    hash: Vec<u8>,
     key: PublicKey,
     builder: Rc<dyn EllipticBuilder>,
 }
 
 impl Verifier {
-    fn verify(&self, signature: Signature) -> bool {
-        todo!()
+    /// 验签
+    pub(crate) fn verify(&self, plain: &str, signature: &Signature) -> bool {
+        let elliptic = self.builder.blueprint();
+        let n1 = elliptic.n.clone().sub(BigUint::one());
+        let (r, s) = (signature.r.clone(), signature.s.clone());
+
+        if r < BigUint::one() || r > n1.clone() {
+            return false;
+        }
+
+        if s < BigUint::one() || s > n1.clone() {
+            return false;
+        }
+
+        let e = {
+            let m = [self.hash.clone(), plain.as_bytes().to_vec()].concat();
+            let h = sm3::hash(m.as_slice());
+            BigUint::from_bytes_be(h.as_slice())
+        };
+
+        let t = r.clone().add(&s).mod_floor(&elliptic.n);
+
+        if BigUint::zero().eq(&t) {
+            return false;
+        }
+
+        let x = {
+            let key = self.key.value();
+            let p1 = self.builder.scalar_base_multiply(s.clone());
+            let p2 = self.builder.scalar_multiply(key.0, key.1, t);
+            let p3 = self.builder.point_add(p1.0, p1.1, p2.0, p2.1);
+            p3.0
+        };
+
+        let rn = e.add(x).mod_floor(&elliptic.n);
+
+        return if rn == r {
+            true
+        } else {
+            false
+        };
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn demo() {
+        println!("BigUint::one() = {:?}", BigUint::one());
     }
 }
