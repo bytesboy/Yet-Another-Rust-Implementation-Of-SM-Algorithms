@@ -2,7 +2,7 @@ use std::ops::{Add, Sub};
 
 use num_bigint::BigUint;
 use num_integer::Integer;
-use num_traits::{FromPrimitive, Num};
+use num_traits::{FromPrimitive, Num, One};
 
 use crate::sm2::ecc::{EllipticBuilder, Verifier};
 
@@ -122,7 +122,7 @@ impl KeyGenerator {
     /// d ∈ \[1, n − 2]
     fn gen_private_key(&self) -> PrivateKey {
         let e = self.builder.blueprint();
-        let from = BigUint::from(1u8);
+        let from = BigUint::one();
         let to = e.n.clone().sub(BigUint::from(2u8));
         PrivateKey(e.random(from, to))
     }
