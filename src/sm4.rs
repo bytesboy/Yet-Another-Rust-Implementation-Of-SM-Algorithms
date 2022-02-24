@@ -17,6 +17,65 @@ pub fn generate_iv() -> String {
     generate_key()
 }
 
+pub fn encrypt_ecb(key: String, plain: String) -> String {
+    let mode = Mode::ECB { key };
+    let crypto = CryptoFactory::new(mode);
+    crypto.encrypt(plain)
+}
+
+pub fn decrypt_ecb(key: String, cipher: String) -> String {
+    let mode = Mode::ECB { key };
+    let crypto = CryptoFactory::new(mode);
+    crypto.decrypt(cipher)
+}
+
+pub fn encrypt_cbc(key: String, iv: String, plain: String) -> String {
+    let mode = Mode::CBC { key, iv };
+    let crypto = CryptoFactory::new(mode);
+    crypto.encrypt(plain)
+}
+
+pub fn decrypt_cbc(key: String, iv: String, cipher: String) -> String {
+    let mode = Mode::CBC { key, iv };
+    let crypto = CryptoFactory::new(mode);
+    crypto.decrypt(cipher)
+}
+
+pub fn encrypt_cfb(key: String, iv: String, plain: String) -> String {
+    let mode = Mode::CFB { key, iv };
+    let crypto = CryptoFactory::new(mode);
+    crypto.encrypt(plain)
+}
+
+pub fn decrypt_cfb(key: String, iv: String, cipher: String) -> String {
+    let mode = Mode::CFB { key, iv };
+    let crypto = CryptoFactory::new(mode);
+    crypto.decrypt(cipher)
+}
+
+pub fn encrypt_ofb(key: String, iv: String, plain: String) -> String {
+    let mode = Mode::OFB { key, iv };
+    let crypto = CryptoFactory::new(mode);
+    crypto.encrypt(plain)
+}
+
+pub fn decrypt_ofb(key: String, iv: String, cipher: String) -> String {
+    let mode = Mode::OFB { key, iv };
+    let crypto = CryptoFactory::new(mode);
+    crypto.decrypt(cipher)
+}
+
+pub fn encrypt_ctr(key: String, iv: String, plain: String) -> String {
+    let mode = Mode::CTR { key, iv };
+    let crypto = CryptoFactory::new(mode);
+    crypto.encrypt(plain)
+}
+
+pub fn decrypt_ctr(key: String, iv: String, cipher: String) -> String {
+    let mode = Mode::CTR { key, iv };
+    let crypto = CryptoFactory::new(mode);
+    crypto.decrypt(cipher)
+}
 
 pub enum Mode {
     ECB { key: String },
