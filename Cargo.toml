@@ -4,10 +4,6 @@ version = "0.1.0"
 edition = "2021"
 description = "Yet another rust implementation of Chinese standard cryptographic algorithms, including SM2,SM3,SM4"
 
-#[lib]
-#name = "yarism"
-#crate-type = ["cdylib"]
-
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
@@ -18,5 +14,3 @@ num-integer = "0.1.44"
 hex = "0.4.3"
 uuid = { version = "0.8.2", features = ["v4"] }
 yasna = { version = "0.5.0", features = ["num-bigint"] }
-
-#mlua = { version = "0.7", features = ["lua54", "vendored", "module"] }
