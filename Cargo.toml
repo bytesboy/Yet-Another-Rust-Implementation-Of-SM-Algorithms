@@ -12,5 +12,5 @@ num-bigint = "0.4.3"
 num-traits = "0.2.14"
 num-integer = "0.1.44"
 hex = "0.4.3"
-uuid = { version = "0.8.2", features = ["v4"] }
+uuid = { version = "0.8.2", features = ["v4", "wasm-bindgen"] }
 yasna = { version = "0.5.0", features = ["num-bigint"] }
