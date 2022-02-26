@@ -8,14 +8,10 @@ mod ecc;
 mod p256;
 
 
-pub fn generate_keypair() -> KeyPair {
+pub fn generate_keypair() -> (String, String) {
     let p256 = P256Elliptic::init();
     let generator = KeyGenerator::init(Box::new(p256));
-    generator.gen_key_pair()
-}
-
-pub fn generate_key() -> (String, String) {
-    let pair = generate_keypair();
+    let pair = generator.gen_key_pair();
     (pair.prk().encode(), pair.puk().encode())
 }
 
