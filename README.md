@@ -1,12 +1,6 @@
 <div align="center">
-
   <h1><code>Yet-Another-Rust-Implementation-Of-SM-Algorithms</code></h1>
-
-  <strong>
-     Yet another rust implementation of Chinese standard cryptographic algorithms, including SM2,SM3,SM4
-  </strong>
-
-
+  <strong>Yet another rust implementation of Chinese standard cryptographic algorithms, including SM2,SM3,SM4</strong>
 </div>
 
 ## About
