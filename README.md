@@ -17,3 +17,6 @@ is a private repository now, which is developed by [`Bytesboy`](https://github.c
 * [`Private Repo: Wrapped-SM-For-Web`](https://github.com/bytesboy/wrapped-sm-for-web.git): Using `wasm-pack` and
   `wasm-pack-template` to wrap `yarism` and compile to webAssembly for node. 
 * [`Private Repo: NoSM`](https://github.com/bytesboy/nosm.git): Examples about how to call `yarism` webassembly.
+* [`Private Repo: Wrapped-SM-For-Java`](https://github.com/bytesboy/wrapped-sm-for-java.git): Wrapping `yarism`  and
+  build `libwsm4l.so` for Lua.
+* [`Private Repo: JaSM`](https://github.com/bytesboy/jasm.git): Examples about how to call `yarism` with java.
