@@ -10,7 +10,7 @@ mod tests {
     #[test]
     fn sm2_keypair() {
         for i in 0..10 {
-            let (prk, puk) = sm2::generate_key();
+            let (prk, puk) = sm2::generate_keypair();
             println!("{:?}: ({:?}, {:?})", i, prk, puk);
         }
     }
